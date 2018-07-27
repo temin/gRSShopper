@@ -84,16 +84,16 @@ Run http://www.downes.ca/cgi-bin/initialize.cgi?action=file
    Click 'Multisite'
 ------------------------------------------------------------
 
-Remove initialize.cgi
+- Remove initialize.cgi
 
-In ../public_html/assets/js/grsshopper_admin.js
-   change www.downes.ca  to your new site URL (bit of a kludge here)
+- In ../public_html/assets/js/grsshopper_admin.js
+   -- change www.downes.ca  to your new site URL (bit of a kludge here)
 
 -----------
 
-Set up Cron (once a minute)
+- Set up Cron (once a minute)
 /home/********/public_html/cgi-bin/admin.cgi www.downes.ca ^^^^^^^^ /home/******/public_html/cgi-bin/data/multisite.txt >/dev/null 2>&1 
 
-where *********** is your directory
+-- where *********** is your directory
 and ^^^^^^^^^^ is the site key entered in the form above
 
