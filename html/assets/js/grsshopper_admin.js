@@ -1,4 +1,4 @@
-var url = 'api.cgi';
+var url = 'https://www.downes.ca/cgi-bin/api.cgi';
 
 //
 //  Initialize Content Windows
@@ -6,92 +6,72 @@ var url = 'api.cgi';
 
 function startUp(url) {
 
-
   $( document ).ready(function() {
 
-    // Load Reader tab
-      $('#Reader').load(url+ "?cmd=show&table=link&id=2",function(response, status, xhr){
+    openDiv(url,'Reader','show','box','Start','Reader');
+    read_into({div:"Read",cmd:"list",table:"link",tab:"Read"});
+    read_into({div:"Make",cmd:"list_tables",table:"tables",tab:"Make"});
+    $('#list-button').hide();
+    closeTalkNav();  // To get it to slide the right way when first started
+
+  });
+}
+
+//
+//  openDiv
+//
+//  Load content into a div and show the div
+//
+
+function openDiv(url,div,app,db,id,title,starting_tab) {
+//alert(app+","+db+","+id+","+title+","+starting_tab);
+    // Assign a URL to main add an "active" class to the button that opened the tab
+
+    if (title) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id+"&title="+title; }
+    else if (id) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id; }
+    else { url = url + "?cmd="+app+"&app="+app+"&db="+db; }
+
+    var openme = 'main';
+    if (div) { openme=div;}
+    $('#'+openme).load(url, function(respose, status, xhr) {
         if (status == "error") {
-             var msg = "Sorry but there was an error loading tables into the Make Tab. ";
+            var msg = "Sorry but there was an error: ";
+            alert(msg + xhr.status + " " + xhr.statusText);
+        }
+     });
+     $('#'+openme+'-tab').tab('show');
+
+}
+
+//
+//  openDiv
+//
+//  Load content into a div
+//  Accepts input as serialized json
+//
+
+function read_into(args) {
+
+   if (!args.url) { args.url = url; }                                       // set default api url
+   if (!args.div) { alert("Div not specified in read_into"); return;}       // set div to read into
+   if (args.cmd) {
+       args.url += "?cmd="+args.cmd;
+       if (args.table) { args.url += "&table="+args.table; }
+       if (args.id) { args.url += "&id="+args.id; }
+       if (args.tab) { args.url += "&tab="+args.tab; }
+   }
+
+    // Load Content into Div
+    //  $('#Reader').load(url+ "?cmd=show&table=link&id=2",function(response, status, xhr){
+      $('#'+args.div).load(args.url,function(response, status, xhr){
+        if (status == "error") {
+             var msg = "Sorry but there was an error loading "+args.url+" into "+args.div;
              alert(msg + xhr.status + " " + xhr.statusText);
              return;
            }
-
-        if (response == "login required") {
-           $('#loginModal').modal('show');
-        }
-
       });
 
 
-      // Load Links into Read tab url = url + "?cmd=list&obj=record&table="+db;
-      $('#Read').load(url+ "?cmd=list&obj=record&table=link&tab=Read",function(response, status, xhr){
-          if (status == "error") {
-               var msg = "Sorry but there was an error loading tables into the Make Tab. ";
-               alert(msg + xhr.status + " " + xhr.statusText);
-               return;
-             }
-
-          if (response == "login required") {
-             $('#loginModal').modal('show');
-          }
-
-      });
-
-
-
-      // Load Links into findSchool tab url = url + "?cmd=list&obj=record&table="+db;
-      $('#findSchool').load(url+ "?cmd=list&obj=record&table=course&tab=findSchool",function(response, status, xhr){
-          if (status == "error") {
-               var msg = "Sorry but there was an error loading tables into the Courses Tab. ";
-               alert(msg + xhr.status + " " + xhr.statusText);
-               return;
-             }
-
-          if (response == "login required") {
-             $('#loginModal').modal('show');
-          }
-
-      });
-
-
-     // Load Tables into Make tab
-     $('#Make').load(url+ "?app=list_tables&tab=Make",function(response, status, xhr){
-       if (status == "error") {
-            var msg = "Sorry but there was an error loading tables into the Make Tab. ";
-            alert(msg + xhr.status + " " + xhr.statusText);
-            return;
-          }
-
-       if (response == "login required") {
-          $('#loginModal').modal('show');
-       }
-
-     });
-     // Hide the List Tab (open only when it's needed)
-     $('#list-button').hide();
-
-
-     // Load Tables into Find
-     $('#findData').load(url+ "?app=list_tables&tab=Find",function(response, status, xhr){
-       if (status == "error") {
-            var msg = "Sorry but there was an error loading tables into the Make Tab. ";
-            alert(msg + xhr.status + " " + xhr.statusText);
-            return;
-          }
-
-       if (response == "login required") {
-          $('#loginModal').modal('show');
-       }
-
-     });
-
-
-
-    closeTalkNav();  // To get it to slide the right way when first started
-
-
-  });
 }
 
 //
@@ -188,53 +168,11 @@ $(document).ready( function() {
     });
 });
 
-//
-// Open the Main Content Window
-//
 
 
-function openDiv(url,div,app,db,id,title,starting_tab) {
-//alert(app+","+db+","+id+","+title+","+starting_tab);
-    // Assign a URL to main add an "active" class to the button that opened the tab
-
-    if (title) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id+"&title="+title; }
-    else if (id) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id; }
-    else { url = url + "?cmd="+app+"&app="+app+"&db="+db; }
-//alert(url);
-//alert(starting_tab);
-    var openme = 'main';
-    if (div) { openme=div;}
-    $('#'+openme).load(url, function(response, status, xhr) {
-        if (status == "error") {
-            var msg = "Sorry but there was an error: ";
-            alert(msg + xhr.status + " " + xhr.statusText);
-        }
-     });
-     $('#'+openme+'-tab').tab('show');
-
-}
-
-//
-// Open the Main Content Window
-//
 
 
-function openMain(url,cmd,db,id,title,starting_tab) {
 
-    // Assign a URL to main add an "active" class to the button that opened the tab
-    var baseurl = url;
-    if (title) { url = url + "?cmd="+cmd+"&starting_tab="+starting_tab+"&db="+db+"&id="+id+"&title="+title; }
-    else if (id) { url = url + "?cmd="+cmd+"&starting_tab="+starting_tab+"&db="+db+"&id="+id; }
-    else { url = url + "?cmd="+cmd+"&starting_tab="+starting_tab+"&db="+db; }
-
-    $('#main').load(url, function(response, status, xhr) {
-        if (status == "error") {
-            var msg = "Sorry but there was an error: ";
-            alert(msg + xhr.status + " " + xhr.statusText);
-        }
-     });
-
-}
 
 //
 // Open the Columns Window (Used by the Forms editor)
@@ -250,6 +188,86 @@ function openColumns(url,db) {
         }
      });
 }
+
+
+
+
+//
+// Function for tab opening
+//
+// Closes other tabs in parent div and opens the tab 'tabName'
+//
+
+
+function openTab(event, tabName, tabType, tabID) {
+    // Declare all variables
+    var i, tabcontent, tablinks;
+
+    // Get all siblings and hide them
+    $('#'+tabName).siblings().hide();
+
+    // Get all elements with class=tabType and remove the class "active"
+    $('.'+tabType).removeClass("active");
+
+    // Show the current tab, and add an "active" class to the button that opened the tab
+    $('#'+tabName).show();
+    if (tabID) { $('#'+tabID).show(); }            // Force hidden tab to reveal itself
+    event.currentTarget.className += " active";    // Is there a JQuery way to do this??
+
+}
+
+
+
+//
+// Open hidden left-side tab
+//
+
+function openHiddenTab(event,url,search,tabname,db,tab) {
+
+    // Assign a URL
+    if (search.length > 0) { url = url + "?cmd=list&obj=record&tab="+tab+"&search="+search+"db="+db;}
+    if (search.length == 0) { url = url + "?cmd=list&obj=record&tab="+tab+"&table="+db; }
+
+    // Get all elements with class="tablinks" and remove the class "active"
+    tablinks = document.getElementsByClassName("tablinks");
+    for (i = 0; i < tablinks.length; i++) {
+        tablinks[i].className = tablinks[i].className.replace(" active", "");
+    }
+
+    // Load the result into the hidden tab content window
+    $("#List").load(url, function(response, status, xhr) {
+        if (status == "error") {
+            var msg = "Sorry but there was an error: ";
+            alert(msg + xhr.status + " " + xhr.statusText);
+        }
+     });
+
+    // Show the hidden tab
+    $("#"+tabname).show();
+
+    // Open the tab content
+    openTab(event, 'List');
+
+    // Make the formerly hidden tab active
+    $("#"+tabname).addClass("active");
+}
+
+function WhichElementIsThis(event) {
+    event = event || window.event;
+    var elem = event.target || event.srcElement;
+    return elem;
+}
+
+
+
+
+
+
+// Submission Functions
+
+
+
+
 
 
 //
@@ -431,127 +449,3 @@ function remove_column(url,table,col_name,content) {
         });
         setTimeout(function(){$('#columns_table').removeClass('spinner');}, 1000);
 }
-
-
-
-
-//
-// Functions for left-side navigation
-//
-
-//
-// Open left-side tab
-//
-
-function openTab(evt, cityName) {
-    // Declare all variables
-    var i, tabcontent, tablinks;
-
-    // Get all elements with class="tabcontent" and hide them
-    tabcontent = document.getElementsByClassName("tabcontent");
-    for (i = 0; i < tabcontent.length; i++) {
-        tabcontent[i].style.display = "none";
-    }
-
-    // Get all elements with class="tablinks" and remove the class "active"
-    tablinks = document.getElementsByClassName("tablinks");
-    for (i = 0; i < tablinks.length; i++) {
-        tablinks[i].className = tablinks[i].className.replace(" active", "");
-    }
-
-    // Show the current tab, and add an "active" class to the button that opened the tab
-    document.getElementById(cityName).style.display = "block";
-    evt.currentTarget.className += " active";
-}
-
-//
-// Open Find tab
-//
-
-function openFindTab(evt, findName) {
-    // Declare all variables
-    var i, tabcontent, tablinks;
-
-    // Get all elements with class="tabcontent" and hide them
-    findtabcontent = document.getElementsByClassName("findtabcontent");
-    for (i = 0; i < findtabcontent.length; i++) {
-        findtabcontent[i].style.display = "none";
-    }
-
-    // Get all elements with class="tablinks" and remove the class "active"
-    findtablinks = document.getElementsByClassName("findtablinks");
-    for (i = 0; i < findtablinks.length; i++) {
-        findtablinks[i].className = findtablinks[i].className.replace(" active", "");
-    }
-
-    // Show the current tab, and add an "active" class to the button that opened the tab
-    document.getElementById(findName).style.display = "block";
-    evt.currentTarget.className += " active";
-}
-//
-// Open Right-side tab
-//
-
-function openTalkTab(evt, talktabName) {
-    // Declare all variables
-    var i, talktabcontent, talktablinks;
-
-    // Get all elements with class="tabcontent" and hide them
-    talktabcontent = document.getElementsByClassName("talktabcontent");
-    for (i = 0; i < talktabcontent.length; i++) {
-        talktabcontent[i].style.display = "none";
-    }
-
-    // Get all elements with class="tablinks" and remove the class "active"
-    talktablinks = document.getElementsByClassName("talktablinks");
-    for (i = 0; i < talktablinks.length; i++) {
-        talktablinks[i].className = talktablinks[i].className.replace(" active", "");
-    }
-
-    // Show the current tab, and add an "active" class to the button that opened the tab
-    document.getElementById(talktabName).style.display = "block";
-    evt.currentTarget.className += " active";
-}
-
-//
-// Open hidden left-side tab
-//
-
-function openHiddenTab(event,url,search,tabname,db,tab) {
-
-    // Assign a URL
-    if (search.length > 0) { url = url + "?cmd=list&obj=record&tab="+tab+"&search="+search+"db="+db;}
-    if (search.length == 0) { url = url + "?cmd=list&obj=record&tab="+tab+"&table="+db; }
-
-    // Get all elements with class="tablinks" and remove the class "active"
-    tablinks = document.getElementsByClassName("tablinks");
-    for (i = 0; i < tablinks.length; i++) {
-        tablinks[i].className = tablinks[i].className.replace(" active", "");
-    }
-
-    // Load the result into the hidden tab content window
-    $("#List").load(url, function(response, status, xhr) {
-        if (status == "error") {
-            var msg = "Sorry but there was an error: ";
-            alert(msg + xhr.status + " " + xhr.statusText);
-        }
-     });
-
-    // Show the hidden tab
-    $("#"+tabname).show();
-
-    // Open the tab content
-    openTab(event, 'List');
-
-    // Make the formerly hidden tab active
-    $("#"+tabname).addClass("active");
-}
-
-function WhichElementIsThis(event) {
-    event = event || window.event;
-    var elem = event.target || event.srcElement;
-    return elem;
-}
-
-
-// End functions for left-side navigation
