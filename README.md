@@ -58,30 +58,50 @@ Run http://www.downes.ca/cgi-bin/initialize.cgi?action=file
    and fill in the form
    
 --------------------------------------------------------------------   
-   Some help with the form (*** means 'pick whatever you want'):
+
+Some help with the form (*** means 'pick whatever you want'):
 
    Site document directory:    ../     
+   
    Site cgi directory is:      ./
+   
    Admin Username			***********
+   
    Admin Password			***********
+   
    Database Name			database name, from above
+   
    Database Location			localhost
+   
    Database Username	database user name, from above
+   
    Database Password	database user password, from above
+   
    Language				en
+   
    Site Document Directory		/home/*******/public_html                 (needs to be full filename and directory)
+   
    Site CGI Directory		/home/*******/public_html/cgi-bin
 
+   
    Site Name				********
+   
    Site Tag				  **********
-   Site Email Address		*********
-   Site Time Zone			America/Toronto
+  
+  Site Email Address		*********
+  
+  Site Time Zone			America/Toronto
+   
    License				CC-by-NC
+   
    Site Key				**********                                             (take note of this, you need it to run cron)
+   
    Administrator Username		**********
+   
    Administrator Password		***********
 	
-   Click 'Multisite'
+- Click 'Multisite'
+
 ------------------------------------------------------------
 
 - Remove initialize.cgi
