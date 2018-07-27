@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
 #    gRSShopper 0.7  Page  0.7  -- gRSShopper administration module
 #    26 April 2017 - Stephen Downes
@@ -25,11 +25,41 @@
 
 
 
+# Load CGI
+
+	use CGI;
+	use CGI::Carp qw(fatalsToBrowser);
+	my $query = new CGI;
+	my $vars = $query->Vars;
+	my $page_dir = "../";
+
+# Quick Page Redirect
+
+	my $action = $vars->{action};
+	my $id = $vars->{id};
+	if ($action eq "rd") {
+		#Redirect
+	}
+
+# Quick show page
+
+	unless ($action) {
+		my @tables = qw(post presentation page author feed link publication);
+		foreach my $table (@tables) {
+			if ($vars->{$table} && !$vars->{force}) {
+				&quick_show_page($page_dir,$table,$vars->{$table});
+				# show $table number $vars->{$table}
+			}
+		}
+	}
+
+
+
 
 # Load gRSShopper
 
 	use File::Basename;
-	use CGI::Carp qw(fatalsToBrowser);
+      use local::lib; # sets up a local lib at ~/perl5
 	my $dirname = dirname(__FILE__);
 	require $dirname . "/grsshopper.pl";
 
@@ -202,6 +232,27 @@ exit;
 #           Functions
 #
 #-------------------------------------------------------------------------------
+
+
+#
+#    Quick Show Page
+#
+# Looks for cached version of page at a file location, and prints it if it's found
+# Otherwise returns in order to generate the page dynamically
+# Override with &force=yes
+#
+
+sub quick_show_page {
+
+	my ($page_dir,$table,$id) = @_;
+	my $page_file = $page_dir.$table."/".$id;
+	return unless (-e $page_file);
+	print "Content-type: text/html\n\n";
+	open FILE, $page_file or die $!;
+	while (<FILE>) { print $_; }
+	close FILE;
+	exit;
+}
 
 
 sub record_hit($table,$id) {

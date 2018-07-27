@@ -19,7 +19,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
 ##########################################################################
 # Servertest.pl
 ##########################################################################
@@ -31,6 +30,8 @@
 
 $|++;
 my $missing = 0;
+use local::lib; # sets up a local lib at ~/perl5
+
 
 # ---------------------------------
 # Let's see what our environment is
@@ -85,13 +86,29 @@ print "gRSShopper web server environment test.".$newline.$newline;
 # -------------
 # Check for CGI::Session
   print "Checking for CGI::Session. This module manages sessions.";
-  eval "use CGI::Carp";
+  eval "use CGI::Session";
   if ($@) {
     print "$newline"."The CGI::Session module could not be located.$newline";
     $missing=1;
   } else {
 	print " OK$newline";
   }
+# -------------
+
+# Check for File::Basename;
+  print "Checking for File::Basename;. This module locates the script directory name.";
+  eval "use File::Basename;";
+  if ($@) {
+    print "$newline"."The File::Basename; module could not be located.$newline";
+    $missing=1;
+  } else {
+	print " OK$newline";
+  }
+
+
+
+
+
 
 # -------------
 # Check for DBI
@@ -232,7 +249,26 @@ print " OK$newline";
 	print " OK$newline";
   }
 
+
+
+
    # -------------
+# Check for Lingua::EN::Inflect
+  print "Checking for Lingua::EN::Inflect. This converts words into their plural form (English)";
+  eval "use Lingua::EN::Inflect";
+  if ($@) {
+    print "$newline"."The Lingua::EN::Inflect module could not be located. Some functions may not work.$newline";
+    $missing=1;
+  } else {
+	print " OK$newline";
+  }
+
+   # -------------
+
+
+
+
+
 
 # Check for Net::Twitter::Lite::WithAPIv1_1
   print "Checking for Net::Twitter::Lite::WithAPIv1_1. This connects to Twitter and executes the new Twitter API";
@@ -246,11 +282,11 @@ print " OK$newline";
 
    # -------------
 
-# Check for Image::Magick
-  print "Checking for Image::Magick. This contains a library opf image processing utilities";
-  eval "use Image::Magick";
+# Check for Image::Resize
+  print "Checking for Image::Resize. This contains a library opf image processing utilities";
+  eval "use Image::Resize";
   if ($@) {
-    print "$newline"."The Image::Magick module could not be located. Icons will not be created.$newline";
+    print "$newline"."The Image::Resize module could not be located. Icons will not be created.$newline";
     $missing=1;
   } else {
 	print " OK$newline";
@@ -350,7 +386,7 @@ print " OK$newline";
   # -------------
 
 # Check for JSON::Parse
- print "Checking for JSON::Parse 'parse_json'. This parses Javascript Onbject Notation";
+ print "Checking for JSON::Parse 'parse_json'. This parses Javascript Object Notation";
  eval "use JSON::Parse 'parse_json'";
  if ($@) {
    print "$newline"."The JSON::Parse 'parse_json' module could not be located. Passwords and access tokens will not work properly.$newline";
@@ -362,10 +398,10 @@ print " OK$newline";
  # -------------
 
 # Check for JSON::XS
-print "Checking for JSON::Parse 'parse_json'. This parses Javascript Onbject Notation";
-eval "use JSON::XS 'parse_json'";
+print "Checking for JSON::XS. This works with Javascript Object Notation";
+eval "use JSON::XS";
 if ($@) {
-  print "$newline"."The JSON::XS 'parse_json' module could not be located. Passwords and access tokens will not work properly.$newline";
+  print "$newline"."The JSON::XS module could not be located. Passwords and access tokens will not work properly.$newline";
   $missing=1;
 } else {
 print " OK$newline";
@@ -384,10 +420,10 @@ print " OK$newline";
 	print " OK$newline";
   }
 
+   # -------------
 
-
-  print "Checking for Facebook::Graph. This provides Facebook authentication";
-  eval "use Facebook::Oauth2";
+  print "Checking for Net::Facebook::Oauth2. This provides Facebook authentication";
+  eval "use Net::Facebook::Oauth2";
   if ($@) {
     print "$newline"."The Net::Facebook::Oauth2 module could not be located. Passwords and access tokens will not work properly.$newline";
     $missing=1;

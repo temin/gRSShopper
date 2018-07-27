@@ -89,8 +89,16 @@ my $sq = "";
 
 $vars->{openid_enabled} = 0;
 
+unless ($vars->{action}) {  	# Redirect ordinary users to subscribe.htm
+ print "Content-type: text.html\n";
+ print "Location: ".$Site->{st_url}."subscribe.htm\n\n";
+                     exit;
+ }
+
+
 for ($vars->{action}) {
 
+	/login_form/ && do { &login_form_text($dbh,$vars); last; };
 	/Login/ && do { &login_form_input($dbh,$query); last; 					};
 	/Logout/ && do { &user_logout($dbh,$query); last;						};
 	/openidloginform/ && do { &openid_login_form($dbh,$query); last; 			};
@@ -212,7 +220,7 @@ sub login_form_text {
 
 							# Page body
 
-	print $Site->{header};
+#	print $Site->{header};
 	print qq|<div id="grey-box-wrapper" class="rounded-whitebox"><h2>$pagetitle</h2><p>$vars->{msg}</p>|;
 
 
@@ -237,6 +245,7 @@ sub login_form_text {
 
 
 	print qq|
+
 		<form method='post' action='$Site->{script}' class="grss-skin">
                 <h3>$Site->{st_name}</h3>
 	      	<p><label>@{[&printlang("Enter your name")]}</label>
@@ -265,7 +274,7 @@ sub login_form_text {
       		@{[&printlang("Forgot password")]}</a></p></div><p id="login-note">@{[&printlang("You Agree")]}</p></form></div>|;
 
 
-	print $Site->{footer};
+#	print $Site->{footer};
 	return;
 }
 
@@ -430,7 +439,7 @@ sub reg_google_user {
 			&login_error("nil",$query,"", "Incorrect Captcha.");
 		}
 	} else {
-		$vars->{msg} .= "Captcha table not found.";
+		$vars->{msg} .= "The Captcha table not found.";
 	}
 
 
@@ -442,7 +451,8 @@ sub reg_google_user {
 						# Unique Email
 
 	if (&db_locate($dbh,"person",{person_email => $vars->{person_email}}) ) {
-		&login_error($dbh,$query,"","Someone else is using this email address."); };
+		&login_error($dbh,$query,"","Someone or something else is using this email address.");
+		};
 
 						# Unique Name
 	if (&db_locate($dbh,"person",{person_title => $vars->{person_title}}) ) {
@@ -1017,9 +1027,9 @@ sub openidq {
 
 									# Print Jumpoff Page
 		print "Content-type: text/html; charset=utf-8\n\n";
-		$Site->{header} =~ s/\Q[*page_title*]\E/OpenID Login Successful/g;
-		print $Site->{header};
-		print qq|<h4>{[&printlang("Connexion réussie")]}</h4>|;
+	#	$Site->{header} =~ s/\Q[*page_title*]\E/OpenID Login Successful/g;
+	#	print $Site->{header};
+		print qq|<h4>{[&printlang("Login Successful")]}</h4>|;
 		print qq|<p>Identity verified. You are $Person->{person_openid}</p>
 			You are currently logged in as $Person->{person_title}.
 			Associating $Person->{person_openid} with this account.</p>
@@ -1031,7 +1041,7 @@ sub openidq {
 	}
 
 	&print_nav_options($dbh,$query);
-	print $Site->{footer};
+	#print $Site->{footer};
 	exit;
 }
 
@@ -1070,8 +1080,8 @@ sub new_user {
 						# Unique Email
 
 	if (&db_locate($dbh,"person",{person_email => $vars->{person_email}}) ) {
-		$errmsg .= &printlang("Someone using").&printlang("Recover registration",$Site->{st_cgi}."login.cgi?refer=$vars->{refer}&action=Email");
-		&login_error($dbh,$query,"",$errmsg);
+		#$errmsg .= &printlang("Someone using").&printlang("Recover registration",$Site->{st_cgi}."login.cgi?refer=$vars->{refer}&action=Email");
+		#&login_error($dbh,$query,"",$errmsg);
 	};
 
 
@@ -1479,13 +1489,13 @@ sub show_connected_page {
 
 	# Page Body - Jumpoff Page
 
-	print $Site->{header};
+#	print $Site->{header};
 	print qq|<div id="grey-box-wrapper" class="rounded-whitebox"><h2>$pagetitle</h2>|;
 	if ($vars->{msg}) {
 		print qq|<div id="notice">$vars->{msg}</div>|;
 	}
 	&print_nav_options($dbh,$query);
-	print $Site->{footer};
+#	print $Site->{footer};
         print qq|</div>|;
 
 }
@@ -1580,6 +1590,10 @@ sub print_nav_options {
 	{
 		# &d2l_nav($dbh,$query)
 
+		my $rf = $Site->{st_cgi}."page.cgi?page=PLE";
+		print qq|<li><a href="$rf">
+			@{[&printlang("gRSShopper PLE")]}</a></li>|;
+
 		if ($Person->{person_status} eq "admin") {				# Site Administration
 			print qq|<li><a href="$Site->{st_cgi}admin.cgi">@{[&printlang("Site Administration")]}</a></li>|;
 		}
@@ -1608,6 +1622,11 @@ sub print_nav_options {
 			print qq|<li><a href="$rf">
 				@{[&printlang("Go Back")]}</a></li>|;
 
+		} else {
+			my $rf = $Site->{st_cgi}."page.cgi?page=PLE";
+			print qq|<li><a href="$rf">
+				@{[&printlang("Go Back")]}</a></li>|;
+
 		}
 	}
 											# Home Page
@@ -1615,21 +1634,25 @@ sub print_nav_options {
 		<li><a href="$Site->{st_url}">
 		@{[&printlang("Site Home Page",$Site->{st_name})]}</a></li>|;
 
-											# Newsletter Subscriptions
-	print qq|
-		<li><a href="$script?action=Subscribe$referq">
-		@{[&printlang("Newsletter subscriptions")]}</a></li>|;
+
+
+
 
 											# Change password
 	unless ($Person->{person_id} eq 2) {
+		print qq|<li><a href="$script?action=Subscribe$referq">@{[&printlang("Newsletter subscriptions")]}</a></li>|;
 		print qq|<li><a href="$script?action=changepwdscr">@{[&printlang("Change password")]}</a></li>|;
 	}
 
 											# Login as another user
 	unless ($Person->{person_id} eq 2) {
-		print qq|<li><a href="$script?$refera$targeta">@{[&printlang("Login as another user")]}</a></li>|;
+		print qq|<li><a href="$script?action=login_text$refera$targeta">@{[&printlang("Login as another user")]}</a></li>|;
 	}
 
+	# Login from anon
+  if ($Person->{person_id} eq 2) {
+    print qq|<li><a href="$script?action=login_text$refera$targeta">@{[&printlang("Login")]}</a></li>|;
+  }
 											# Logout
 	unless ($Person->{person_id} eq 2) {
 		print qq|<li><a class="disconnect" href="$script?action=Logout$refera$targeta">@{[&printlang("Logout")]}</a></li>|;

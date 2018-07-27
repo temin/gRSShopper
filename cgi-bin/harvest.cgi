@@ -29,6 +29,7 @@
   use strict;
 
   print "Content-type: text/html; charset=utf-8\n\n";
+
   use CGI::Carp qw(warningsToBrowser fatalsToBrowser);
   our $DEBUG = 1;							# Toggle debug
 
@@ -40,6 +41,7 @@
 
 	use File::Basename;
 	use CGI::Carp qw(fatalsToBrowser);
+  use local::lib; # sets up a local lib at ~/perl5
 	my $dirname = dirname(__FILE__);
 	require $dirname . "/grsshopper.pl";
 
@@ -109,6 +111,7 @@
 	# GETTER - get the feed we are harvesting
 
 		# Get Feed Data (Exit if not found) and store in $feedrecord
+
 		my $feedrecord = gRSShopper::Feed->new({dbh=>$dbh,id=>$feedid});
 	  &diag(2,qq|Feed Title: |.$feedrecord->{feed_title}.qq| <br>\n\n|);
 		unless ($feedrecord) {
@@ -179,14 +182,14 @@ sub harvest_queue {
 	my $feedid = $next->{feed_id};
 
   # If found, Harvest Feed
-	if ($next->{feed_id}) {
-	  &diag(2,qq|Next in queue is feed number $feedid<br>\n\n|);
-		&harvest_feed($feedid);
-	} else {
-    &diag(2,qq|<div class="harvestererror">Cannot find next feedid in queue</div>|);
-		return;
+#	if ($next->{feed_id}) {
+#	  &diag(2,qq|Next in queue is feed number $feedid<br>\n\n|);
+#		&harvest_feed($feedid);
+	#} else {
+#    &diag(2,qq|<div class="harvestererror">Cannot find next feedid in queue</div>|);
+#		return;
 
-	}
+#	}
 
   # Done
 	&diag(2,qq|</div></div>\n\n|);

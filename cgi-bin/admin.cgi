@@ -22,10 +22,7 @@
 #           Admin Functions
 #
 #-------------------------------------------------------------------------------
-  print "Content-type: text/html\n\n";
-
-
-
+#  print "Content-type: text/html\n\n";
 
 
 
@@ -44,6 +41,7 @@
 
 	use File::Basename;
 	use CGI::Carp qw(fatalsToBrowser);
+      use local::lib; # sets up a local lib at ~/perl5
 	my $dirname = dirname(__FILE__);
 	require $dirname . "/grsshopper.pl";
 
@@ -80,8 +78,8 @@
 # Option to call initialize functions
 
 	if ($vars->{action} eq "initialize") {  $Site->__initialize("command"); }
-    print "Content-type: text/html\n\n";
-    while (my($fx,$fy) = each %$vars) { print "$fx = $fy<br>";}   #{%}
+#    print "Content-type: text/html\n\n";
+#    while (my($fx,$fy) = each %$vars) { print "$fx = $fy<br>";}   #{%}
 
 # Restrict to Admin
 
@@ -202,6 +200,7 @@ if ($action) {
 	for ($action) {
 														# Main admin menu nav
 
+		/start/ && do { &admin_start($dbh,$query); last;			};	# 	- Start Menu
 		/general/ && do { &admin_general($dbh,$query); last;			};	# 	- General Menu
 		/harvester/ && do { &admin_harvester($dbh,$query); last;		};	# 	- Harvester Menu
 		/users/ && do { &admin_users($dbh,$query); last;			};	# 	- Users Menu
@@ -250,7 +249,7 @@ if ($action) {
 		/publish/ && do {
 				if ($table eq "badge"){ &publish_badge($dbh,$query,$id,"verbose"); last;}
 				else { &publish_page($dbh,$query,$vars->{page},"verbose"); last; } };
-
+    /verify_email/ && do { &admin_verify_emails(); last; };
 		/rollup/ && do { &news_rollup($dbh,$query); last;			};	#	- Show posts allocated to future newsletters
 		/autosub/ && do { &autosubscribe_all($dbh,$query); last;   };			#	- Auto-subscribe all users to newsletter
 		/autounsub/ && do { &autounsubscribe_all($dbh,$query); last; };			#	- Auto-unsubscribe all users from newsletter
@@ -491,6 +490,21 @@ sub admin_configtable {
 		</div>\n";
 }
 
+# -----------------------------------   Admin: Start   -----------------------------------------------
+#
+#  Start screen for gRSShopper PLE
+#
+# ------------------------------------------------------------------------------------------------------
+
+sub admin_start {
+
+	   my ($dbh,$query) = @_;
+
+		 &admin_frame($dbh,$query,"Welcome to gRSShopper","Welcome to gRSShopper");					# Print Output
+	 	exit;
+
+}
+
 # -----------------------------------   Admin: General   -----------------------------------------------
 #
 #   Initialization and editing of general site configuration data
@@ -511,14 +525,14 @@ sub admin_general {
 
 	$content .= &admin_api($dbh,$query);
 
-#	$content .= &admin_configtable($dbh,$query,"Base URLs and Directories",
-#		("Base URL:st_url","Base Directory:st_urlf","CGI URL:st_cgi","CGI Directory:st_cgif","Login URL:st_login"));
+	$content .= &admin_configtable($dbh,$query,"Base URLs and Directories",
+		("Base URL:st_url","Base Directory:st_urlf","CGI URL:st_cgi","CGI Directory:st_cgif","Login URL:st_login"));
 
-#	$content .= &admin_configtable($dbh,$query,"Media Directories",
-#		("Images:st_img","Photos:st_photo","Files:st_file","Icons:st_icon"));
+	$content .= &admin_configtable($dbh,$query,"Media Directories",
+		("Images:st_img","Photos:st_photo","Files:st_file","Icons:st_icon"));
 
-#	$content .= &admin_configtable($dbh,$query,"Upload Directories",
-#		("Uploads:st_upload","Images:up_image","Documents:up_docs","Slides:up_slides","Audio:up_audio","Videos:up_video"));
+	$content .= &admin_configtable($dbh,$query,"Upload Directories",
+		("Uploads:st_upload","Images:up_image","Documents:up_docs","Slides:up_slides","Audio:up_audio","Videos:up_video"));
 
 	&admin_frame($dbh,$query,"Admin General",$content);					# Print Output
 	exit;
@@ -734,7 +748,6 @@ sub admin_multi {
 
 	&admin_frame($dbh,$query,"Multi-".$action." ".$table."s",$content);					# Print Output
 	exit;
-
 
 
 
@@ -1139,6 +1152,7 @@ sub admin_newsletters {
 	return unless (&is_viewable("admin","newsletter")); 		# Permissions
 	my $adminlink = $Site->{st_cgi}."admin.cgi";
 
+
 	my $content = qq|<h2>Newsletters</h2><p>Each newsletter is composed of a page and a list of subscribers.
 		Edit pages at left, and to turn any page into a newsletter, set 'Autopub' to 'yes' and 'Sub' to 'yes'.
 		Newsletter contents are typically created automatically using 'keyword' commands in the page; see
@@ -1148,7 +1162,11 @@ sub admin_newsletters {
             of the screen.|;
 
 
-
+  $content .= qq|
+   <p><b>Verify Email Addresses</b><br>
+	 This might take a while.
+	 [<a href="|.$Site->{st_cgi}.qq|admin.cgi?action=verify_email">Click here</a>]<p>
+  |;
 
 	# Get list of eligible newsletters in dropdown form
 	my $npageoptionlist = "<option>Select a newsletter</option>\n";
@@ -1223,6 +1241,70 @@ sub admin_newsletters {
 
 	&admin_frame($dbh,$query,"Admin General",$content);					# Print Output
 	exit;
+
+
+
+}
+
+# -----------------------------------   Admin: Verify Emails   -----------------------------------------------
+#
+#   Cycles through all the email addresses in the person table
+#   Verifies each in turn (note: this can take a while)
+#   Sets a verified/not verified flad in the person
+#
+# ------------------------------------------------------------------------------------------------------
+
+sub admin_verify_emails {
+return 1;
+#	use Email::Verify::SMTP;
+  $|++;
+  print "Content-type: text/html\n\n";
+	my $sth = $dbh -> prepare("SELECT * FROM person"); $sth -> execute();
+
+
+
+	while (my $p = $sth -> fetchrow_hashref()) {
+		print $p->{person_id}." (".$p->{person_title}."): ";
+		if ($p->{person_email}) {
+			  print $p->{person_email}."(".$p->{person_eformat}.")<br>";
+				# Find out if, and why not (if not):
+				my ($is_valid, $msg) = verify_email($p->{person_email});
+				if( $is_valid ) {
+								print "email is valid<br>";
+								&db_update($dbh,"person",{person_eformat=>"valid"},$p->{person_id});
+					# Email is valid:
+				}
+				else {
+					# Email is *not* valid:
+					print "Email is bad: $msg <br>";
+					&db_update($dbh,"person",{person_eformat=>$msg},$p->{person_id});
+				}
+
+
+		}
+  }
+
+	exit;
+
+	# This is important:
+	$Email::Verify::SMTP::FROM = 'verifier@downes.ca';
+
+	# Just a true/false:
+	if( verify_email('stephen@downes.ca') ) {
+		print "email is valid<p>";
+		# Email is valid
+	}
+
+	# Find out if, and why not (if not):
+	my ($is_valid, $msg) = verify_email('stephensm@knox.nsw.edu.au');
+	if( $is_valid ) {
+					print "email is valid<p>";
+		# Email is valid:
+	}
+	else {
+		# Email is *not* valid:
+		print "Email is bad: $msg";
+	}
 
 
 
@@ -1435,10 +1517,12 @@ sub admin_db_export {
 
 	if ($vars->{export_format} eq "json") {
 		print "Content-type: application/json\n\n";
-		my $keyfield = $vars->{table}."_id";
-		my $hash_ref = $dbh->selectall_hashref(qq|select * from $vars->{table}|,$keyfield);
+    my $keyfield = $vars->{table}."_id";
+		#my $hash_ref = $dbh->selectall_hashref(qq|select * from $vars->{table}|,$keyfield);
+    my $export->{$vars->{table}} = $dbh->selectall_hashref(qq|select * from $vars->{table}|,$keyfield);
 		use JSON::XS;
-		my $utf8_encoded_json_text = encode_json $hash_ref;
+		#my $utf8_encoded_json_text = encode_json $hash_ref;
+    my $utf8_encoded_json_text = encode_json $export;
 		print "$utf8_encoded_json_text";
 		exit;
 	} else {
@@ -1799,7 +1883,7 @@ sub import {
 	my $vars = $query->Vars;
 
   print "Content-type: text/html\n\n";
-  while (my($fx,$fy) = each %$vars) { print "$fx = $fy<br>";}
+  #while (my($fx,$fy) = each %$vars) { print "$fx = $fy<br>";}
 	print "<h1>Importing List</h1>";
 	print "Table: $table File: ".$vars->{myfile}."<br>";                  #"
 
@@ -1814,8 +1898,6 @@ sub import {
 
 
 	if ($file->{file_format} =~ /^json$/i) {
-
-print "Yes";
 
 		my $result = &import_json($file,$table);
 		&admin_list_records($dbh,$query,$table);
@@ -2686,8 +2768,8 @@ sub edit_record {
 	#&form_editor($dbh,$query,$table,$id_number);
 
 	$form_text =~ s/&#39;/'/mig;
-  $form_text = qq|<script src="http://www.downes.ca/assets/js/jquery.min.js"></script>
-       <script src="http://www.downes.ca/assets/js/grsshopper_admin.js">|.$form_text;
+  $form_text = qq|<script src="https://www.downes.ca/assets/js/jquery.min.js"></script>
+       <script src="https://www.downes.ca/assets/js/grsshopper_admin.js">|.$form_text;
 	if ($viewer) { return $form_text; }							# Send form text to viewer, or
 	else { &admin_frame($dbh,$query,"Edit $table",$form_text); } 				# Print Output
 
@@ -2968,6 +3050,8 @@ sub cron_tasks {
 		exit;
 	}
 
+
+
 										# Get the time
 	my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
 	my @wdays = qw|Sunday Monday Tuesday Wednesday Thursday Friday Saturday|;
@@ -3165,12 +3249,13 @@ $sth->execute();
 
 
 sub send_nl {
-
+  $|++; # Stream output
 	my ($dbh,$query,$page_id,$send_list,$verbose) = @_;
 	my $vars = $query->Vars;
-	my $report = "Send Newsletter\n\n";
+	print "Content-type: text/html; charset=utf-8\n\n";
+	my $report;
 
-	return unless (&is_allowed("send","newsletter"));	# Admin Only
+	# return unless (&is_allowed("send","newsletter"));	# Admin Only
 
 	$page_id ||= $vars->{page_id};				# ID of page to send
 	$send_list ||= $vars->{send_list};				# Send to admin or subscribers
@@ -3178,77 +3263,70 @@ sub send_nl {
 	my $date = &nice_date(time);
 	my $today = &day_today;
 
-	if ($verbose) { 					# Print web page header
-		$Site->{header} =~ s/\Q[*page_title*]\E/Send Newsletter/g;
-		$Site->{header} =~ s/\Q<page_title>\E/Send Newsletter/g;
-		print "Content-type: text/html; charset=utf-8\n\n";
-		print $Site->{header};
-		print "<h2>Send Newsletter</h2>";
-		print "<p>Today is $today, $date.</p>";
-	}
 
-								# Get newsletter page data
+	# Get newsletter page data
 	my $record = &db_get_record($dbh,"page",{page_id=>$page_id});
-	if ($verbose) { print "<p>Preparing email. "; }
 	my ($pgcontent,$pgtitle,$pgformat,$pgarchive,$keyword_count) = &publish_page($dbh,$query,$page_id,0);
 	$pgtitle .= " ~ $date";
-	if ($verbose) { print "Sending page: $pgtitle </p>\n"; }
-	$report .= "$pgtitle \n\n";
+
+
+	print qq|
+		  <h2>Send Newsletter</h2>
+			<p>Page $page_id:  $pgtitle <br>
+		  Today is $today, $date.</p>
+	| if ($verbose);
+
 
 								# Do not send empty newsletters
-	unless ($keyword_count) {
-		&send_email("stephen\@downes.ca","stephen\@downes.ca","Failed content",
-			"No new content; no newsletter sent.".$content.$status);
-		if ($verbose) { print "<p>No new content for $pgtitle; no newsletter sent.</p>"; print $Site->{footer}; }
-		$report .= "No new content; no newsletter sent. \n\n";
-		return;
-	}
+#	unless ($keyword_count) {
+
+#		&send_email("stephen\@downes.ca","stephen\@downes.ca","Failed content",
+#			"No new content in $page_id; no newsletter sent.".$content.$status);
+#		if ($verbose) { print "<p>No new content for $page_id $pgtitle; no newsletter sent.</p>"; print $Site->{footer}; }
+#		$report .= "No new content in $page_id ; no newsletter sent. \n\n";
+#		return;
+#	}
 
 
-								# Get subscriber List
-	my $subscribers = {}; my $stmt;
-	if ($send_list eq "all_users") { $stmt = "SELECT person_id FROM person";	}
-	else { $stmt = "SELECT subscription_person FROM subscription WHERE subscription_box='$page_id'";	}
-	$report .= "Sending to $send_list\n\n";
+	# Get subscriber List
+	my @subscribers = &graph_list("page",$page_id,"person","subscribe");
 
-	$subscribers = $dbh->selectcol_arrayref($stmt);
 
 								# Loop through subscriber list
 
 	my $count = 0;
-	foreach my $subscriber (@$subscribers) {
+
+	foreach my $subscriber (@subscribers) {
+
+		# Get subscriber data
 		my $subdata = &db_get_record($dbh,"person",{person_id=>$subscriber});
-		if ( ($subdata->{person_email}) &&
-		     ( ($send_list eq "subscribers") ||
-		       ($send_list eq "all_users") ||
-		       ($send_list eq "admin" && $subdata->{person_status} eq "admin") ) ) {
-			$count++;
-			my $customcontent = $pgcontent;
-			$customcontent =~ s/SUBSCRIBER/$subdata->{person_email}/sg;				# Customize
-			$customcontent =~ s/PERSON/$subdata->{person_id}/sg;
-			$customcontent =~ s/SUBSCRIBER/$subscriber/sg;
+		if ($send_list eq "admin") { next unless ($subdata->{person_status} eq "admin"); }
+		next unless ($subdata->{person_eformat} eq "valid");
+		# print $subscriber." ".$subdata->{person_email}." (".$subdata->{person_eformat}.")<br>" if ($verbose);
+		print $subdata->{person_email}."\n" if ($verbose);
+    $count++;
+next;
+    # Customize Newsletter
+		my $customcontent = $pgcontent;
+		$customcontent =~ s/SUBSCRIBER/$subdata->{person_email}/sg;				# Customize
+		$customcontent =~ s/PERSON/$subdata->{person_id}/sg;
+		$customcontent =~ s/SUBSCRIBER/$subscriber/sg;
 
+    # Send Newsletter
+		&send_email($subdata->{person_email},$Site->{st_pub},$pgtitle,$customcontent,$pgformat);
 
-			&send_email($subdata->{person_email},$Site->{st_pub},$pgtitle,$customcontent,$pgformat);
-			$report .= ": $subdata->{person_email}\n";
-			if ($verbose) {
-				if ($count < 10) { print "&nbsp"; }
-				if ($count < 100) { print "&nbsp"; }
-				if ($count < 1000) { print "&nbsp"; }
-				print "$count - $subdata->{person_email}\n<br>";
-
-			}
-		}
 	}
 
 	my $cmg = "$count newsletters sent.";
 	if ($count == 1) { $cmg = "1 newsletter sent."; }
-	if ($verbose) {
-		print "<hr><p>$cmg newsletter sent.</p>";
-		print $Site->{footer};
-	}
-	$report .= "\n$cmg.\n\n";
+	if ($verbose) {	print "<hr><p>$cmg newsletter sent.</p>";	}
+
+
+	$report .= "Report for page $page_id:  $pgtitle <br>\n$cmg.\n\n";
 	if ($dbh) { $dbh->disconnect; }		# Close Database and Exit
+
+	&send_email('stephen@downes.ca',$Site->{st_pub},"Send Report - $pgtitle",$report,'htm');
+
 	return $report;
 
 }
@@ -3357,10 +3435,11 @@ sub rotate_hit_counters {
 	}
 
 	$message_text .= "<br>Done";
-	&send_email("stephen\@downes.ca","stephen\@downes.ca","Rotating Hits Counter",
-		$message_text);
+	#&send_email("stephen\@downes.ca","stephen\@downes.ca","Rotating Hits Counter",
+	#	$message_text);
 
 	return;
+
 }
 
 

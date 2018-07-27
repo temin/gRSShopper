@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
 #    gRSShopper 0.7  API 0.01  -- gRSShopper api module
 #    30 December 2017 - Stephen Downes
@@ -22,7 +22,7 @@
 #           API Functions
 #
 #-------------------------------------------------------------------------------
-print "Content-type: text/html\n\n";
+
 
 
 # Forbid bots
@@ -34,9 +34,11 @@ print "Content-type: text/html\n\n";
   use strict;
 	use File::Basename;
 	use CGI::Carp qw(fatalsToBrowser);
+      use local::lib; # sets up a local lib at ~/perl5
+	use Fcntl qw(:flock SEEK_END);
 	my $dirname = dirname(__FILE__);
 	require $dirname . "/grsshopper.pl";
-
+	use JSON;
 
 # Load modules
 
@@ -56,16 +58,58 @@ print "Content-type: text/html\n\n";
 
 # while (my($vx,$vy) = each %$vars) { print "$vx = $vy <br>"; }
 
+# -------------------------------------------------------------------------------------
+#          Public App Functions
+#
+# These are requests put to the app to offer some sort of form or interaction
+#
+# -------------------------------------------------------------------------------------
+
   # LOGIN
 	if ($vars->{cmd} eq "login") {
-
+		print "Content-type: text/html\n\n";
 		 print &api_login();
 		 exit;
+	}
 
+	# SUBSCRIBE FORM
+	if ($vars->{cmd} eq "subform") {
+		print "Content-type: text/html\n\n";
+		 print &api_subscription_form();
+		 exit;
+	}
+
+  # SUBSCRIBE
+	if ($vars->{cmd} eq "subscribe") {
+		print "Content-type: text/html\n\n";
+		 print &api_subscribe();
+		 exit;
+	}
+
+	# UNSUBSCRIBE FORM
+	if ($vars->{cmd} eq "unsubform") {
+		print "Content-type: text/html\n\n";
+		 print &api_unsubscribe_form();
+		 exit;
+	}
+
+	# UNSUBSCRIBE
+	if ($vars->{cmd} eq "unsubscribe") {
+		print "Content-type: text/html\n\n";
+		 print &api_unsubscribe();
+		 exit;
+	}
+
+	# CONFIRM
+	if ($vars->{cmd} eq "confirm") {
+		print "Content-type: text/html\n\n";
+		 print &api_confirm();
+		 exit;
 	}
 
   # START
   elsif ($vars->{cmd} eq "start") {
+		print "Content-type: text/html\n\n";
 		my @tabs = split",",$vars->{tabs};
 		unless (@tabs) { @tabs = ('Database');}
 			 #{}print qq|<textarea cols=60 rows=60>|;
@@ -107,7 +151,7 @@ print "Content-type: text/html\n\n";
 	}
 
 	&admin_only();
-
+  print "Content-type: text/html\n\n";
 
 # get Postdata, in which API JSON will be stored
 
@@ -157,23 +201,67 @@ print "Content-type: text/html\n\n";
 #
 # -------------------------------------------------------------------------------------
 
+if ($vars->{app}) { $vars->{cmd} = $vars->{app}; }        #  temporary
+if ($vars->{db}) { $vars->{table} = $vars->{db}; }        #  temporary
+if ($vars->{cmd} eq "list_tables") { $vars->{cmd} = "list"; $vars->{obj}="tables"; }
 
 # COMMANDS
 
 if ($vars->{cmd}) {
 
 	# LIST
+
 	if ($vars->{cmd} eq "list") {
-   if ($vars->{obj} eq "record") { print &api_list_records(); exit; }
-   elsif ($vars->{obj} eq "table") { print &list_tables(); exit; }
+
+    # List Tables
+		if ($vars->{obj} eq "tables") { print &list_tables(); exit; }  # Temporary
+		if ($vars->{table} eq "tables") { print &list_tables(); exit; }
+
+		# List Records - produces a lovely formatted list of records with edit and delete options
+    unless ($vars->{table}) { print "Table to $vars->{cmd} has not been specified."; exit; }
+	  unless ($vars->{tab}) { $vars->{tab} = "no-tab"; }
+	  print &list_records($dbh,$query,$vars->{table},$vars->{tab});
+    exit;
+
   }
+
+
 
   # BACKUP
   elsif ($vars->{cmd} eq "backup") { print &api_backup(); exit; }
 
+	# DUMP
+  elsif ($vars->{cmd} eq "dump") {
+
+		my $output = "<p>Table: $vars->{table}  ID: $vars->{id}</p> ";
+		return "Table not specified" unless ($vars->{table});
+		return "Record ID not specified" unless ($vars->{id});
+
+	  my $record = &db_get_record($dbh,$vars->{table},{$vars->{table}."_id" => $vars->{id}});
+	  while (my($dx,$dy) = each %$record) {
+			$output .= qq|<b>$dx</b>: $dy <br>|;
+		}
+	  print $output;
+
+		exit;
+
+
+	}
+
   # CREATE
   elsif ($vars->{cmd} eq "create") {
-   if ($vars->{obj} eq "table") { print &api_create_table(); exit; }
+   if ($vars->{obj} eq "table") {
+
+		 my $apilink = $Site->{st_cgi}."api.cgi";
+		 unless ($vars->{table}) { print "Table to $vars->{cmd} has not been specified."; exit; }
+		 $vars->{table} =~ s/[^a-zA-Z0-9_-]//g;
+		 &db_create_table($dbh,$vars->{table});
+	   print "Creating table $vars->{table} " .
+		    qq|<a href="#" onClick="openDiv('$apilink','main','edit','form','','|.$vars->{table}.qq|','Database');">Edit the New Table</a>|;
+		 exit;
+
+
+    }
 	}
 
 
@@ -181,15 +269,20 @@ if ($vars->{cmd}) {
   elsif ($vars->{cmd} eq "edit") {
 		unless ($vars->{table} ) { print "Table to $vars->{cmd} has not been specified."; exit; }
 		my $tabs = "";
-		print &main_window($tabs,"Edit",$vars->{table},"$vars->{id}",$vars);
+		if ($vars->{id} eq "me") { $vars->{id} = $Person->{person_id}};		# Edit myself
+		my $starting_tab = $vars->{starting_tab} || "Edit";
+		print &main_window($tabs,$starting_tab,$vars->{table},"$vars->{id}",$vars);
 		exit;
 	}
+
+
 
 	# IMPORT
   elsif ($vars->{cmd} eq "import") {
 		unless ($vars->{table} ) { print "Table to $vars->{cmd} has not been specified."; exit; }
 		my $tabs = ['Import','Export'];
-		print &main_window($tabs,"Import",$vars->{table},"none",$vars);
+		my $starting_tab = $vars->{starting_tab} || "Import";
+		print &main_window($tabs,$starting_tab,$vars->{table},"none",$vars);
 		exit;
 	}
 
@@ -198,24 +291,58 @@ if ($vars->{cmd}) {
 		unless ($vars->{table} ) { print "Table to $vars->{cmd} has not been specified."; exit; }
 		unless ($vars->{id} ) { print ucfirst($vars->{table})." to $vars->{cmd} has not been specified."; exit; }
 		my $tabs = ['Harvest'];
-		print &main_window($tabs,"Harvest",$vars->{table},"$vars->{id}",$vars);
+		my $starting_tab = $vars->{starting_tab} || "Harvest";
+		print &main_window($tabs,$starting_tab,$vars->{table},"$vars->{id}",$vars);
 		exit;
 	}
 
 	# DROP
 	elsif ($vars->{cmd} eq "drop") {
-		if ($vars->{obj} eq "table") { print &api_drop_table(); exit; }
+		if ($vars->{obj} eq "table") {
+
+			my $apilink = $Site->{st_cgi}."api.cgi";
+			unless ($vars->{table}) { print "Table to $vars->{cmd} has not been specified."; exit; }
+
+			# Back up table
+		  my $savemsg = &api_backup($vars->{table});
+
+			# Drop table
+			my $dropmsg = &db_drop_table($dbh,$vars->{table});
+
+		  print qq|$savemsg <br>$dropmsg|;
+			exit;
+
+
+		}
 	}
 
 	# DELETE
   elsif ($vars->{cmd} eq "delete") {
-		if ($vars->{obj} eq "record") { print &api_delete_record(); exit; }
+		if ($vars->{obj} eq "record") {
+
+			my $apilink = $Site->{st_cgi}."api.cgi";
+			unless ($vars->{table}) { print "Table to $vars->{cmd} has not been specified."; exit; }
+			unless ($vars->{id}) { print "ID number to $vars->{cmd} has not been specified."; exit; }
+
+			&record_delete($dbh,$query,$vars->{table},$vars->{id},"silent");
+			# Back up table
+		  #my $savemsg = &api_backup($vars->{table});
+
+			# Drop table
+			#my $dropmsg = &db_drop_table($dbh,$vars->{table});
+
+		  print qq|OK|;
+			exit;
+
+
+
+		}
 	}
 
   # ADMIN
   elsif ($vars->{cmd} eq "admin") {
 		my $starting_tab = $vars->{starting_tab} || "Database";
-		print &main_window(['Database','Harvester','Permissions','Logs','General'],$starting_tab);
+		print &main_window(['Database','Harvester','Users','Permissions','Logs','General'],$starting_tab);
 	 	exit;
 	}
 
@@ -226,7 +353,7 @@ if ($vars->{cmd}) {
 		exit;
 	}
 
-	# SOCIAL
+	# PUBLISHING
   elsif ($vars->{cmd} eq "publishing") {
 		my $starting_tab = $vars->{starting_tab} || "Newsletters";
 		print &main_window(['Subscribers','Newsletters','Accounts','Meetings'],$starting_tab);
@@ -239,8 +366,6 @@ if ($vars->{cmd}) {
 	 	exit;
   }
 
-
-
 	# CLONE
 	elsif ($vars->{cmd} eq "clone") {
 		print &api_clone();
@@ -252,6 +377,154 @@ if ($vars->{cmd}) {
 		print &api_autopost();
 		exit;
 	}
+
+	#----------------------------------------------------------------------------------------------------------
+	#
+  #   gRSShopper Blockchain APIs (because I can't resist playing)
+	#   Based on Daniel Flymen, Learn Blockchains by Building One
+	#   https://hackernoon.com/learn-blockchains-by-building-one-117428612f46
+	#
+	#----------------------------------------------------------------------------------------------------------
+
+
+	# NEW TRANSACTION
+  elsif ($vars->{cmd} eq "transaction") {
+
+    my $blockchain = new gRSShopper::Blockchain;
+    die "Missing values in blockchain transaction" unless ($vars->{sender} && $vars->{recipient} && $vars->{amount});
+		my $index = $blockchain->new_transaction($vars->{sender},$vars->{recipient},$vars->{amount});
+    my $response = {message => "Transaction will be added to Block $index"};
+
+		&blockchain_close($blockchain);
+
+		print encode_json( $response );
+		exit;
+	}
+
+	# MINE
+  elsif ($vars->{cmd} eq "mine") {
+
+	  my $blockchain = new gRSShopper::Blockchain;
+		my $node_identifier = 1;
+
+		# We run the proof of work algorithm to get the next proof...
+		my $last_block = $blockchain->last_block();
+		my $last_proof = $last_block->{proof};
+		my $proof = $blockchain->proof_of_work($last_proof);
+
+		# We must receive a reward for finding the proof.
+	  # The sender is "0" to signify that this node has mined a new coin.
+		$blockchain->new_transaction(0,$node_identifier,1);
+		my $previous_hash = $blockchain->hash($last_block);
+		my $block = $blockchain->new_block($proof,$previous_hash);
+
+		my $response = {
+			message => "New Block Forged",
+			index => $block->{index},
+			transactions =>  $block->{transactions},
+			proof =>  $block->{proof},
+			previous_hash => $block->{previous_hash}
+		};
+
+		&blockchain_close($blockchain);
+		print encode_json( $response );
+		exit;
+	}
+
+
+	# CHAIN
+  elsif ($vars->{cmd} eq "chain") {
+
+	  my $blockchain = new gRSShopper::Blockchain;
+
+		my @chain = $blockchain->{chain};
+
+		my $response = {
+        chain => $blockchain->{chain},
+        length => scalar @chain,
+    };
+
+		&blockchain_close($blockchain);
+		print encode_json( $response );
+		exit;
+	}
+
+	# REGISTER
+  elsif ($vars->{cmd} eq "register") {
+
+    # Only registers one node at at time; I'll fix at a future point
+	  unless ($vars->{node}) { die "Error: Please supply a valid node"; }
+
+
+		my @nodes;
+		push @nodes,$vars->{node};
+		my $blockchain = new gRSShopper::Blockchain;
+
+	  foreach my $node (@nodes) {
+			$blockchain->register_node($node);
+		}
+
+	  my $response = {
+			message => 'New nodes have been added',
+			total_nodes => @nodes,
+	  };
+
+		&blockchain_close($blockchain);
+		print encode_json( $response );
+	  exit;
+	}
+
+	# RESOLVE
+  elsif ($vars->{cmd} eq "resolve") {
+
+		my $blockchain = new gRSShopper::Blockchain;
+		my $replaced = $blockchain->resolve_conflicts();
+		my $response;
+
+    if ($replaced) {
+        $response = {
+            message => 'Our chain was replaced',
+            new_chain => $blockchain->{chain},
+        };
+    } else {
+        $response = {
+            message => 'Our chain is authoritative',
+            chain => $blockchain->{chain},
+        };
+    }
+		&blockchain_close($blockchain);
+		print encode_json( $response );
+
+    exit;
+
+	}
+
+	# Save the updated copy of the blockchain to a file
+
+	sub blockchain_close {
+
+		my ($blockchain) = @_;
+
+		my $output = ();
+		$output->{chain} = $blockchain->{chain};
+		$output->{current_transactions} = $blockchain->{current_transactions};
+		$output->{nodes} = $blockchain->{nodes};
+		my $json_data = encode_json( $output );
+
+    # None of this worked
+		# our $JSON = JSON->new->utf8;
+		# $JSON->convert_blessed(1);
+		# my $json_data = $JSON->encode($blockchain);
+		# my $json_data = JSON::to_json($blockchain, { allow_blessed => 1, allow_nonref => 1 });
+
+		my $blockchain_file = "data/blockchain.json";
+		open(my $fh, ">$blockchain_file") || die "Could not open $blockchain_file for write";
+    flock($fh, LOCK_EX) or die "Cannot lock $blockchain_file - $!\n";
+		print $fh $json_data;
+    close $fh;
+
+	}
+
 
    print "Command $vars->{cmd} not recognized.";
 	 exit;
@@ -270,6 +543,8 @@ sub api_show_record {
 
 	 unless ($vars->{table}) { return "Don't know which table to show."; exit;}
 	 return unless (&is_allowed("view",$vars->{table}));
+	 &admin_only() if ($vars->{table} eq "box" && $vars->{id} eq "Start");	# Sets PLE start screen to login if needed
+	 print "Content-type: text/html\n\n";
    unless ($vars->{id}) { return "Don't know which ".$vars->{table}." number to show."; exit;}
 	 $vars->{format} ||= "html";
 	 return	&output_record($dbh,$query,$vars->{table},$vars->{id},$vars->{format},"api");
@@ -278,22 +553,7 @@ sub api_show_record {
 
 
 
-# API LIST ----------------------------------------------------------
-# ------- Table ------------------------------------------------------
-#
-# List records in a table
-# Will accept search parameters
-#
-# -------------------------------------------------------------------------
 
-sub api_list_records {
-
-	unless ($vars->{db}) { print "Table to $vars->{cmd} has not been specified."; exit; }
-  unless ($vars->{tab}) { $vars->{tab} = "no-tab"; }
-	print &list_records($dbh,$query,$vars->{table},$vars->{tab});
-	exit;
-
-}
 
 # API BACKUP ----------------------------------------------------------
 # ------- Back Up Table ------------------------------------------
@@ -316,79 +576,9 @@ sub api_backup {
 }
 
 
-# API CREATE ----------------------------------------------------------
-# ------- Table -----------------------------------------------------
-#
-# Create a table in the database
-# Expects $vars->{table} as table name
-#
-# -------------------------------------------------------------------------
 
 
-sub api_create_table {
 
-   my $apilink = $Site->{st_cgi}."api.cgi";
-	 unless ($vars->{table}) { print "Table to $vars->{cmd} has not been specified."; exit; }
-	 $vars->{table} =~ s/[^a-zA-Z0-9_-]//g;
-	 &db_create_table($dbh,$vars->{table});
-   return "Creating table $vars->{table} " .
-	    qq|<a href="#" onClick="openMain('$apilink','edit','form','','|.$vars->{table}.qq|','Database');">Edit the New Table</a>|;
-	 exit;
-
-}
-
-
-# API DROP ----------------------------------------------------------
-# ------- Table -----------------------------------------------------
-#
-# Create a table in the database
-# Expects $vars->{table} as table name
-#
-# -------------------------------------------------------------------------
-
-
-sub api_drop_table {
-
-  my $apilink = $Site->{st_cgi}."api.cgi";
-	unless ($vars->{table}) { print "Table to $vars->{cmd} has not been specified."; exit; }
-
-	# Back up table
-  my $savemsg = &api_backup($vars->{table});
-
-	# Drop table
-	my $dropmsg = &db_drop_table($dbh,$vars->{table});
-
-  return qq|$savemsg <br>$dropmsg|;
-	exit;
-
-}
-
-# API DELETE ----------------------------------------------------------
-# ------- Record -----------------------------------------------------
-#
-# Delete Record
-# Expects $vars->{table} as table name, $vars->{id} as table id
-#
-# -------------------------------------------------------------------------
-
-
-sub api_delete_record {
-
-  my $apilink = $Site->{st_cgi}."api.cgi";
-	unless ($vars->{table}) { print "Table to $vars->{cmd} has not been specified."; exit; }
-	unless ($vars->{id}) { print "ID number to $vars->{cmd} has not been specified."; exit; }
-
-	&record_delete($dbh,$query,$vars->{table},$vars->{id},"silent");
-	# Back up table
-  #my $savemsg = &api_backup($vars->{table});
-
-	# Drop table
-	#my $dropmsg = &db_drop_table($dbh,$vars->{table});
-
-  return qq|OK|;
-	exit;
-
-}
 
 
 # API LOGIN ----------------------------------------------------------
@@ -466,6 +656,268 @@ sub api_login {
    exit;
 }
 
+# API SUBSCRIPTION FORM ---------------------------------------------------------- "
+# ------- Page -----------------------------------------------------
+#
+# Subscribe to a page - form
+#
+# Generic request for a subscription form
+# Autogenerates capcha that must be filled
+#
+# -------------------------------------------------------------------------
+
+sub api_subscription_form {
+
+print qq|
+	<p><form method="post" action="https://www.downes.ca/cgi-bin/api.cgi">
+	<input type="hidden" name="cmd" value="subscribe">
+	<input type="radio" name="page_id" value="2"> OLDaily<br>
+	<input type="radio" name="page_id" value="3"> OLWeekly<br>
+	Email: <input type="email" name="email" size=60>|.
+	&set_capcha().
+	qq|<input type="submit" value="Subscribe">
+	</form></p>
+|;
+exit;
+
+
+
+}
+
+sub set_capcha {
+
+	# Set up captcha
+	my $captchas = ""; my $capt_text = "";
+	if ($Site->{st_capcha_on} eq "yes") {			# Using capchas? (st_capcha_on = yes)
+
+		if ($captchas = &get_captcha_table()) {
+			my @capkeys = keys %$captchas;
+			my $caplen = scalar @capkeys;
+			my $cap_sel = rand($caplen);
+
+			$capt_text =  qq|<div id="captcha">
+			<p><label>@{[&printlang("Enter capcha text")]}</label><br>
+			<img src="$Site->{st_url}images/captchas/|.
+			@capkeys[$cap_sel].qq|.jpg" alt="|.@capkeys[$cap_sel].
+			qq|"><input type='hidden' name='captcha_index' value='|.
+			@capkeys[$cap_sel].qq|'>
+			<span id="captcha-wrapper">
+			<input type='text' size="10" name='captcha_submit'>
+			</span></p></div>|;
+		} else {
+			return @{[&printlang("Captcha table not found")]}.": ". $Site->{data_dir}."captcha_table.txt";
+		}
+	}
+   return $capt_text;
+
+}
+
+
+sub get_captcha_table {
+
+	my $captchas;
+	my $found = 0;
+	my $cfilename = $Site->{data_dir}."captcha_table.txt";
+
+	open IN,"$cfilename";
+	while (<IN>) {
+		chomp;
+		my ($x,$y) = split "\t",$_;
+		$y =~ s/[^a-zA-Z0-9]//g;			# Picking up some formatting junk from captcha table?
+
+
+		$captchas->{$x} = $y;
+	}
+	close IN;
+
+	return  $captchas;
+
+}
+
+# API SUBSCRIBE ---------------------------------------------------------- "
+# ------- Page -----------------------------------------------------
+#
+# Subscribe to a page
+#
+# expects vars->{page_id} and vars->{email}
+# if capcha is enabled expects two capcha values as well
+#
+# -------------------------------------------------------------------------
+
+sub api_subscribe {
+
+  # Verify Input
+  unless ($vars->{email}) { print "No email address provided to subscribe"; exit; };
+	unless ($vars->{page_id}) { print "No page id provided to subscribe" ; exit; }
+  my $page = &db_get_record($dbh,"page",{page_id=>$vars->{page_id}});
+	unless ($page) { print "Mailing list page does not exist." ; exit; }
+
+		# Captcha Test
+	my $captchas;
+	if ($captchas = &get_captcha_table()) {
+		  unless ( $vars->{captcha_submit} eq $captchas->{$vars->{captcha_index}}) {
+	   	print "Incorrect Captcha.";
+			exit;
+		}
+	} else {
+		print "Captcha table not found.";
+	}
+
+  # Check email address
+	# use Mail::CheckUser qw(check_email);
+#  my $is_valid = check_email($vars->{email});
+my $is_valid = 1;
+
+  # If email is valid
+	if( $is_valid ) {
+
+    my $subscriber = &db_get_record($dbh,"person",{person_email=>$vars->{email}});
+		unless ($subscriber) {
+			my $subscriberid =  &db_insert($dbh,$query,"person",{person_email=>$vars->{email}});
+			$subscriber = &db_get_record($dbh,"person",{person_email=>$vars->{email}});
+			die "Cannot create new subscriber in api_subscribe()" unless ($subscriber);
+		}
+
+    # Print landing page
+	  print "<p>Thank you. An email has been sent to ".$vars->{email}.
+				" Please check your email inbox to confirm your subscription.</p>".
+				"<p>Note that if the email does not appear in your inbox this means that ".
+				$Site->{st_pub}." may be blocked by your email administrator. If so, you will need to ensure that ".
+				$Site->{st_pub}." is whitelisted in order to receive this newsletter.";
+
+    # Create a code
+		my $code = $vars->{page_id} + $subscriber->{person_id} + time;
+		$code = $code*55;
+
+    # Generate email text
+		my $admintext = "<p>Someone, probably you, has requested to subscribe to ".$page->{page_title}." on ".$Site->{st_name}.
+		   ". Please click on or load the following URL into your web browser in order to confirm:<br><br>".
+			 $Site->{st_cgi}."api.cgi?cmd=confirm&pg=".$vars->{page_id}."&sb=".$subscriber->{person_id}."&code=".$code.
+			 "<br><br>Thank you.</p>";
+		my $subject = $Site->{st_name}." subscription verification";
+		$subject =~ s/&#39;/'/g;
+
+		# Send confirmation email
+		&send_email($vars->{email},$Site->{st_pub},$subject,$admintext,"htm");
+	}
+	else {
+	  # Email is *not* valid:
+	  print "<p>We cannot confirm that ".$vars->{email}." is a valid email address. ".
+	        "<br>Please contact ".$Site->{st_pub}." directly to subscribe to this mailing list</p>";
+		exit;
+	}
+}
+
+
+
+# API UNSUBSCRIBE ---------------------------------------------------------- "
+# ------- Page -----------------------------------------------------
+#
+# Unsubscribe from a page
+#
+# expects vars->{page_id} and vars->{email}
+# if capcha is enabled expects two capcha values as well
+#
+# -------------------------------------------------------------------------
+
+sub api_unsubscribe_form {
+
+print qq|
+
+	<p><form method="post" action="https://www.downes.ca/cgi-bin/api.cgi">
+	<input type="hidden" name="cmd" value="unsubscribe">
+	<input type="radio" name="page_id" value="2"> OLDaily<br>
+	<input type="radio" name="page_id" value="3"> OLWeekly<br>
+	<input type="text" name="email" size=60>
+	<input type="submit" value="Unubscribe">
+	</form>
+|;
+exit;
+
+
+
+}
+
+# API UNSUBSCRIBE ---------------------------------------------------------- "
+# ------- Page -----------------------------------------------------
+#
+# Unsubscribe from a page
+#
+# expects vars->{page_id} and vars->{email}
+# if capcha is enabled expects two capcha values as well
+#
+# -------------------------------------------------------------------------
+
+sub api_unsubscribe {
+
+  # Verify Input
+  unless ($vars->{email}) { print "No email address provided to unsubscribe"; exit; };
+	unless ($vars->{page_id}) { print "No page id provided to unsubscribe" ; exit; }
+
+  my $page = &db_get_record($dbh,"page",{page_id=>$vars->{page_id}});
+	unless ($page) { print "Mailing list page does not exist." ; exit; }
+
+  my $subscriber = &db_get_record($dbh,"person",{person_email=>$vars->{email}});
+	unless ($subscriber) { print "This email doesn't exist in our records."; exit; }
+
+	my $result = &graph_delete("person",$subscriber->{person_id},"page",$vars->{page_id},"subscribe");
+
+  # Print landing page
+	print "<p>Thank you. You have been unsubscribed. Sorry to see you go.";
+
+  # Generate email text
+	my $page = &db_get_record($dbh,"page",{page_id=>$vars->{page_id}});
+	my $admintext = "<p>Someone, probably you, has requested to unsubscribe to ".$page->{page_title}." on ".$Site->{st_name}.
+		   ". If this was in error you can subscribe again at ".$Site->{st_url}."subscribe.htm";
+	my $subject = $Site->{st_name}." Unsubscription verification";
+	$subject =~ s/&#39;/'/g;
+
+	# Send confirmation email
+	&send_email($vars->{email},$Site->{st_pub},$subject,$admintext,"htm");
+	&send_email('stephen@downes.ca',$Site->{st_pub},"Unsubscription",$vars->{email}.
+		" has unsubscribed from ".$page->{page_title},"htm");
+
+}
+
+sub api_confirm {
+
+	unless ($vars->{sb}) { print "No email address provided to confirm"; exit; };
+	unless ($vars->{pg}) { print "No page id provided to confirm" ; exit; }
+	unless ($vars->{code}) { print "No code provided to confirm" ; exit; }
+
+  my $code = $vars->{code}/55;
+	my $subtime = $code - $vars->{sb} - $vars->{pg};    # Time subscription was submitted
+	my $day = (60*60*24);
+	if ($subtime < (time-$day) || $subtime > (time+$day)) {
+		print qq|<p>Sorry, this subscription request has expired.
+		Please <a href="$Site->{st_url}subscribe.htm">visit the subscribe page</a> and try again.</p>|; exit;
+	}
+
+
+	# Confirm validated email
+	&db_update($dbh,"person",{person_eformat=>"valid"},$vars->{sb});
+
+	# Associate person with page
+	my $graphid = graph_add("person",$vars->{sb},"page",$vars->{pg},"subscribe",1);
+	if ($graphid) {
+		print "<p>Sub time is ".localtime($subtime)." ";
+  	print "Confirmed. $graphid</p>";
+
+
+		#my @subs = graph_list("page",$vars->{pg},"person","subscribe");
+		#my $substr; foreach my $subs (@subs) { $substr .= $subs.",";}
+
+		my $page = &db_get_record($dbh,"page",{page_id=>$vars->{pg}});
+		my $subscriber = &db_get_record($dbh,"person",{person_id=>$vars->{sb}});
+		print "<p>Your subscription to ".$page->{page_title}." has been confirmed.</p>";
+		&send_email('stephen@downes.ca',$Site->{st_pub},"New Subscription",$subscriber->{person_email}.
+			" has subscribed to ".$page->{page_title},"htm");
+	} else {
+		print "Your subscription request failed. Sorry.";
+
+	}
+}
+
 
 
 # API PAGE PUBLISH ---------------------------------------------------------- "
@@ -478,6 +930,66 @@ sub api_login {
 
 
 sub api_page_publish {
+
+  # VCard
+  if ($vars->{table} =~ /vcard/i) {
+
+		use vCard;
+
+		$Person->{person_work_email} ||= $Person->{person_email};
+		$Person->{person_home_email} ||= $Person->{person_email};
+
+		# create the object
+
+		my $vcard_hash = {
+
+		full_name    => $Person->{person_name},
+    given_names  => $Person->{given_names},
+    family_names => $Person->{family_names},
+    title        => 'Research Scientist',
+    photo        => $Person->{person_photo},
+
+    addresses =>   [
+    { type      => ['home'],
+      city      => $Person->{person_city},
+      region    => $Person->{person_province},
+      post_code => '',
+      country   => $Person->{person_country},
+      preferred => 1,
+    },
+  ],
+
+		};
+
+
+
+		my $vcard = vCard->new;
+
+		$vcard->load_hashref($vcard_hash);
+
+
+    my $emails = [];
+		if ($Person->{person_home_email}) { push @$emails,{ type => ['home'], address => $Person->{person_home_email} }; }
+		if ($Person->{person_work_email}) { push @$emails, { type => ['work'], address => $Person->{person_work_email} };  }
+		$vcard->email_addresses($emails);
+
+    my $phones = [];
+		if ($Person->{person_home_phone}) { push @$phones,{ type => ['home'], number => $Person->{person_home_phone} }; }
+		if ($Person->{person_work_phone}) { push @$phones, { type => ['work'], number => $Person->{person_work_phone} };  }
+  	$vcard->phones($phones);
+
+		my $vcard_filename = $Site->{st_urlf}."vcard.vcf";
+		open OUT,">$vcard_filename";
+		print OUT $vcard->as_string();
+		close OUT;
+		print qq|vCard printed to |.
+		   $Site->{st_url}.
+		   qq|vcard.vcf <br><a href="|.
+			 $Site->{st_url}.
+			 qq|vcard.vcf">click here</a> to view. |;
+		exit;
+
+	}
 
 	unless ($vars->{table} eq "page") { return qq|Only publishing pages at the moment|; exit; }
 	unless ($vars->{id}) { return qq|Publish command needs a page ID to publish|; exit; }
@@ -759,7 +1271,7 @@ sub api_publish {
 			my $twitter = &twitter_post($dbh,"post",$id);
 			print "Twitter result: $twitter<br>";
 			$published .= ",twitter";
-			my $result = &db_update($dbh,$table, {$col => $published}, $id);
+			my $result = &db_update($dbh,$table, {$col => $published}, $id); # Prevent publishing twice
 			print "Recorded publication success $result<br>";
 			exit;
 
@@ -769,10 +1281,13 @@ sub api_publish {
 		elsif ($vars->{value} =~ /web|json|rss/i) {
 
 			$published .= ",".$vars->{value};
-			my $result = &db_update($dbh,$table, {$col => $published}, $id);
+			my $result = &db_update($dbh,$table, {$col => $published}, $id); # Prevent publishing twice
 			print "Published to ".$vars->{value}."<p>";
 			exit;
 		}
+
+
+
 	}
 
 }
@@ -1192,6 +1707,8 @@ sub api_save_file {
 		my $iconname = $vars->{graph_table}."_".$vars->{graph_id}.".jpg";
 
 		my $tmb = &make_thumbnail($filedir,$filename,$icondir,$iconname);
+	#	print "Content-type: text/html\n\n";
+	# 	print "Thumbnail: $tmb <p>";
 	}
 
 
@@ -1295,7 +1812,7 @@ sub api_clone {
    print "Cloning ".$record->{$vars->{table}."_title"}.": ";
 	 my $id = record_save($dbh,$record,$vars->{table},$record);
    print qq|Created new <a href="|.$Site->{st_url}.$vars->{table}.qq|/$id" target="_new">|.$vars->{table}.qq| number $id</a> |;
-	 print qq|[<a href="#" onclick="openMain('$Site->{script}','edit','$vars->{table}','$id');">Edit</a>]|;
+	 print qq|[<a href="#" onclick="openDiv('$Site->{script}','main','edit','$vars->{table}','$id');">Edit</a>]|;
 	 exit;
 }
 
@@ -1315,62 +1832,12 @@ sub api_autopost {
 	 my $url = $Site->{st_cgi}."api.cgi";
    unless ($vars->{id}) { return "Don't know which ".$vars->{table}." number to clone."; exit; }
 	 my $post_id = &auto_post($dbh,$query,$vars->{id});
-	 if ($post_id > 0) { return qq|<a onclick="openMain('$url','edit','post','$post_id');alert('Autopost Submitted');openDiv('$url','Reader','show','link','$vars->{id}');$('#Edit').tab('show');">Edit Post</a>|; }
+	 if ($post_id > 0) { return qq|<a onclick="openDiv('$url','main','edit','post','$post_id');alert('Autopost Submitted');openDiv('$url','Reader','show','link','$vars->{id}');$('#Edit').tab('show');">Edit Post</a>|; }
    else { return $post_id; } # which will be an error message
 	 exit;
 }
 
 
-# Legacy
-
-if ($vars->{app}) {
-
-
-
-  # Edit
-
-  if ($vars->{app} eq "edit") {
-
-		 unless ($vars->{db}) { print "Table to $vars->{app} has not been specified."; exit; }
-
-		 my $tabs = "";
-		 print &main_window($tabs,"Edit");
-		 exit;
-	}
-
-  # List
-  elsif ($vars->{app} eq "list") {
-
-		 unless ($vars->{db}) { print "Table to $vars->{app} has not been specified."; exit; }
-     print &list_records($dbh,$query,$vars->{db});
-		 exit;
-	}
-
-  # List Tables
-  elsif ($vars->{app} eq "list_tables") {
-     print &list_tables($dbh);
-		 exit;
-  }
-
-	# Show Columns from Tables
-  elsif ($vars->{app} eq "show_columns") {
-	   print &show_columns($vars->{db});
-		 exit;
-	}
-
-	# Admin
-  elsif ($vars->{app} eq "admin") {
-	   print &main_window(['Database','text','moretext'],'Database');
-		 exit;
-	}
-
-  # Unrecognized
-  else {
-	   print "App command (".$vars->{app}.") not recognized.";
-		 exit;
-  }
-
-}
 
 # -------------------------------------------------------------------------------------
 #          Update Functions

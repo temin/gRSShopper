@@ -31,6 +31,7 @@ sub load_modules {
 	$!++;							# CGI
 	use CGI;
 	use CGI::Carp qw(fatalsToBrowser);
+      use local::lib; # sets up a local lib at ~/perl5
 
 	use CGI::Session;
 	my $query = new CGI;
@@ -42,6 +43,7 @@ sub load_modules {
 	use LWP;
 	use LWP::UserAgent;
 	use LWP::Simple;
+
 
 	# Added by Luc - Support for french (or other) dates
 	# Required by : locale_date
@@ -61,10 +63,12 @@ sub load_modules {
 		use Lingua::EN::Inflect qw ( PL );
 	}
 
+
+
 							# Optional Modules
 	unless (&new_module_load($query,"MIME::Types")) { $vars->{warnings} .= "MIME::Types;"; }
 	unless (&new_module_load($query,"Net::Twitter::Lite::WithAPIv1_1")) { $vars->{warnings} .= "Net::Twitter::Lite::WithAPIv1_1;"; }
-	unless (&new_module_load($query,"Image::Magick")) { $vars->{warnings} .= "Image Magick;"; }
+	unless (&new_module_load($query,"Image::Resize")) { $vars->{warnings} .= "Image::Resize;"; }
 	unless (&new_module_load($query,"DateTime")) { $vars->{warnings} .= "DateTime;"; }
 	unless (&new_module_load($query,"DateTime::TimeZone")) { $vars->{warnings} .= "DateTime::TimeZone;"; }
 	unless (&new_module_load($query,"Time::Local")) { $vars->{warnings} .= "Time::Local;"; }
@@ -158,7 +162,9 @@ sub get_site {
 	# Create new Site object
 	our $Site = gRSShopper::Site->new({
 		context		=>	$context,
-		data_dir	=>	'/var/www/cgi-bin/data/',		# Location of site configuration files
+		data_dir	=>	'./data/',		# Location of site configuration files
+		secure => 1,							# Turns on SSH
+
 	});
 
 
@@ -363,6 +369,7 @@ sub admin_only {
 
   # if ($Person->{person_title} eq "Downes") { $Person->{person_status} = "admin" }
   #
+
 	unless ($Person->{person_status} eq "admin") {	 &login_needed(); 	}
 }
 
@@ -545,6 +552,30 @@ sub permission_default {
 }
 
 #     OUTPUT and PUBLISH
+
+
+
+#
+#    Quick Show Page
+#
+# Looks for cached version of page at a file location, and prints it if it's found
+# Otherwise returns in order to generate the page dynamically
+# Override with &force=yes
+#
+
+sub quick_show_page {
+
+	my ($page_dir,$table,$id) = @_;
+	my $page_file = $page_dir.$table."/".$id;
+	return unless (-e $page_file);
+	#print "Content-type: text/html\n\n";
+	open FILE, $page_file or die $!;
+	while (<FILE>) { print $_; }
+	close FILE;
+	exit;
+}
+
+
 #-------------------------------------------------------------------------------
 	# -------   Output Record ------------------------------------------------------
 
@@ -556,17 +587,20 @@ sub output_record {
 	my $vars = (); if (ref $query eq "CGI") { $vars = $query->Vars; }
 	my $output = "";
 
-
 	# Identify record to output																									# Check Request
 	$table ||= $vars->{table}; die "Table not specified in output record" unless ($table);			#   - table
-	$id_number ||= $vars->{id_number};
+	$id_number ||= $vars->{id_number}; my $findable = $id_number;
 	unless ($table) { my $err = ucfirst($table)." ID not specified in output record" ; die "$err"; } 	#   - ID number
 	unless ($id_number =~ /^[+-]?\d+$/) { $id_number = &find_by_title($dbh,$table,$id_number); } 		#     (Try to find ID number by title)
 	$format ||= $vars->{format} || "html";									#   - format
 
 	# Get Record
 	my $record = &db_get_record($dbh,$table,{$table."_id"=>$id_number});					# Get Record
-	unless ($record) { die "Looking for $table number $id_number, but it was not found, sorry."; }		#     - catch get record error
+	unless ($record) {
+		print "Content-type: text/html\n\n";
+		print "Looking for $table '$findable', but it was not found, sorry.";
+		exit;
+	}		#     - catch get record error
     #	my ($hits,$total) = &record_hit($table,$id_number);							#     - Increment record hits counter
 
 	# Permissions
@@ -621,6 +655,14 @@ sub output_record {
 
 	$output .= $record->{page_content};
 
+
+	# Print Cache version to file
+	my $page_dir = $Site->{st_urlf}.$table;
+	unless (-d $page_dir) { mkdir($page_dir,0755); }
+	my $page_file = $Site->{st_urlf}.$table."/".$id_number;
+	open FILE, ">$page_file" or die $!;
+	print FILE $output;
+	close FILE;
 														# Fill special Admin links and post-cache data
 
 	&make_pagedata($query,\$wp->{page_content},\$wp->{page_title});
@@ -670,6 +712,8 @@ sub publish_page {
 		$sth -> execute($page_id);
 	}
 
+
+
 							# Get Page Data
 	my $count=0;my $wp;
 	while ($wp = $sth -> fetchrow_hashref()) {
@@ -677,8 +721,12 @@ sub publish_page {
 
 		$wp->{page_content} = $wp->{page_code};
 
+
+
 		next unless (&is_allowed("publish","page",$wp));
 		unless ($opt eq "silent" || $opt eq "initialize") { print "Publishing Page: ",$wp->{page_title},$LF; }
+
+
 
 								# Skip non-auto in autopublish mode
 		if ($page_id eq "auto") {
@@ -686,11 +734,15 @@ sub publish_page {
 		}
 
 
+
+
 								# Make Sure We Have Content
 		unless ($wp->{page_content}) {
-			unless ($opt eq "silent") { print qq|Whoa, this page has no content $LF $LF|; }
+			&publish_error($page_id,qq|Whoa, this page ".$wp->{page_title}."($page_id) has no content $LF $LF|);
 			next;
 		}
+
+
 
 								# Add Headers and Footers
 
@@ -703,15 +755,19 @@ sub publish_page {
 		&db_update($dbh,"page",{page_update=>$wp->{page_update}},$wp->{page_id});
 
 
+
+
 		# Format Page Content
 		&format_content($dbh,$query,$options,$wp);
 		$wp->{page_content} =~ s/\Q<page_id>\E/$page_id/g;
 		$wp->{page_content} =~ s/\Q[*page_id*]\E/$page_id/g;
 		unless ($wp->{page_linkcount} || $wp->{page_allow_empty} eq "yes") {
-			print "Zero linkcount, page not published.<p>";
+			&publish_error($page_id,"Zero linkcount in page ".$wp->{page_title}."($page_id), page not published.<p>");
 			next;
 		}
 		$keyword_count = $wp->{page_linkcount};
+
+
 
 
 
@@ -723,11 +779,15 @@ sub publish_page {
 			{page_content=>$wp->{page_content},page_latest=>time},
 			$page_id);
 
+
+
 								# Make Sure We Have an Output File
 		unless ($wp->{page_location}) {
-			unless ($opt eq "silent") { print qq|Whoa, no file to print this to $LF $LF|; }
+			unless ($opt eq "silent") { &publish_error($page_id,qq|Whoa, no file to print page ".$wp->{page_title}."($page_id) to $LF $LF|); }
 			next;
 		}
+
+
 
 								# Remove CGI Headers
 
@@ -736,15 +796,24 @@ sub publish_page {
 		my $hdr1 = 'Content-type: text/html; charset=utf-8';
 		wp->{page_content} =~ s/($hdr0|$hdr1|$hdr9)//sig;
 
+
+
 								# Print Page
 
 		my $pgfile = $Site->{st_urlf} . $wp->{page_location};
 		my $pgurl = $Site->{st_url} . $wp->{page_location};
 
-		unless (open PSITE, ">$pgfile") { print qq|Cannot open $pgfile : $! $LF $LF|; exit; }
-		unless (print PSITE $wp->{page_content}) { print qq| Cannot print to $pgfile : $!  $LF $LF|; close PSITE; exit; }
+
+
+		print "Publishing to ",$pgfile,$LF;
+
+		unless (open PSITE, ">$pgfile") { &publish_error($page_id,qq|Cannot open ".$wp->{page_title}."($page_id) $pgfile : $! $LF $LF|); exit; }
+		unless (print PSITE $wp->{page_content}) { &publish_error($page_id,qq| Cannot print to ".$wp->{page_title}."($page_id) $pgfile : $!  $LF $LF|); close PSITE; exit; }
 		unless ($opt eq "silent" || $opt eq "initialize") { print qq|Saved page to <a href="$pgurl">$pgurl</a>  $LF|; }
 		close PSITE;
+
+
+
 
 
 
@@ -754,9 +823,9 @@ sub publish_page {
 		if ($wp->{page_archive} eq "yes") {
 
 			my ($save_to,$save_url) = &archive_filename($wp->{page_location});
-			unless ($save_to) { print qq|No location to save archive file.$LF $LF|; }
-			open POUT,">$save_to" or print qq|Error opening to write to $save_to : $! $LF $LF|;
-			print POUT $wp->{page_content} or print qq|Error printing to $save_to : $! $LF $LF|;
+			unless ($save_to) { &publish_error($page_id,qq|No location to save ".$wp->{page_title}."($page_id) archive file.$LF $LF|); }
+			open POUT,">$save_to" or &publish_error($page_id,qq|Error opening to write ".$wp->{page_title}."($page_id) to $save_to : $! $LF $LF|);
+			print POUT $wp->{page_content} or &publish_error($page_id,qq|Error printing ".$wp->{page_title}."($page_id) to $save_to : $! $LF $LF|);
 			close POUT;
 			unless ($vars->{mode} eq "silent" || $opt eq "silent" || $opt eq "initialize") {
 				print qq|Archived $wp->{page_title} to <a href="$save_url">$save_url</a> |;
@@ -783,6 +852,21 @@ sub publish_page {
 
 }
 
+sub publish_error {
+
+  my ($pg,$err) = @_;
+  my $LF;
+  if ($Site->{cron} ) {
+     $LF = "\n";
+  } else {
+     print "Publish Error: Page $pg","<br/>\n",$err,"<br/>\n";
+
+  }
+
+
+	&send_email("stephen\@downes.ca","stephen\@downes.ca","Publish Error: Page $pg",$err,'htm');
+
+}
 	# -------  Publish badge --------------------------------------------------------
 sub publish_badge {
 
@@ -956,7 +1040,9 @@ sub bake_badge {
 # Receives text pointer as input; acts directly on text
 sub list_tables {
 
-	my ($dbh,$query) = @_;
+  # Try to display from cache in cgi-bin/data/tables
+	my $tab = lc($vars->{tab});
+	&quick_show_page("","data","tables-".$tab);
 
 	my @tables = $dbh->tables();
 	my $output;
@@ -965,7 +1051,7 @@ sub list_tables {
 	&admin_only();
 
 	# If needed, get form data (tells us what to list, based on tab) - eg. If tab is Read, then to view, form_read="yes" for the given table
-	my @filter; my $tab = lc($vars->{tab});
+	my @filter;
 	if ($tab) {
 		@filter = &db_get_record_list($dbh,"form",{"form_".$tab => "yes"},"form_title");
 	}
@@ -985,19 +1071,39 @@ sub list_tables {
 		if (@filter) { next unless (my ($matched) = grep $_ eq $tname, @filter); }
 
 		# Format the output
+		# Open Main: url,cmd,db,id,title,starting_tab
 		my $onclickurl = $Site->{st_cgi}."api.cgi";
 		$output .= qq|<li class="table-list-element">|;
-		if ($tab eq "make") { $output .= qq| [<a href="#" onClick="openMain('$onclickurl','edit','$tname');">New</a>]|; }
-		if ($tab eq "find") { $output .= qq| [<a href="#" onClick="openMain('$onclickurl','import','$tname');">Import</a>]|; }
-		$output .= qq|[<a href="#" onClick="openHiddenTab(event,'$onclickurl','','list-button','$tname','List');">List</a>] |.
-			ucfirst($tname).qq| </li>\n
-		|;
+		if ($tab eq "make") { $output .= qq| [<a href="#" onClick="openDiv('$onclickurl','main','edit','$tname','new','','Edit');">New</a>]|; }
+		if ($tab eq "find") { $output .= qq| [<a href="#" onClick="openDiv('$onclickurl','main','import','$tname','','','Import');">Import</a>]|; }
+
+
+		$output .= qq|[<a href="#" onClick="openTab(event,'List','tablinks','list-button');
+			read_into({div:'List',url:'$onclickurl',cmd:'list',table:'$tname'});">List</a>] |.
+    	ucfirst($tname).qq| </li>\n		|;
+
+
 	}
 
 	# Return nicely formatted output
-	return qq|<ul class="table-list">|.$output.qq|</ul>|;
+
+  $output = qq|<ul class="table-list">|.$output.qq|</ul>|;
+
+	# Print Cache version to file
+	my $page_file = $Site->{st_cgif}."data/tables-".$tab;
+	open FILE, ">$page_file" or die $!;
+	print FILE $output;
+	close FILE;
+
+	print $output;
+		print "NOT Printed from cache";
+	return ;
 
 }
+
+
+
+
 sub list_records {
 
 	my ($dbh,$query,$table,$tab) = @_;
@@ -1063,6 +1169,7 @@ sub list_records {
 	$sthl->execute();
 	if ($sthl->errstr) { print "Content-type: text/html\n\n";print "DB LIST ERROR: ".$sthl->errstr." <p>"; exit; }
   # print Search form
+
 	$output .=  qq|<div class="table-list-heading">
 
 	   <span title="Search" onClick="toggle_visibility('$tab-search-box');"  ><i class="fa fa-search"></i></span>|;
@@ -1129,11 +1236,13 @@ sub list_records {
 						   $recordstatus = qq|<img src="$Site->{st_url}assets/img/|.$list_record->{$table."_status"}.qq|tiny.jpg">|;
 					}
 
-
+         # Open Main: url,cmd,db,id,title,starting_tab
+          my $starting_tab = "Edit";
+				  if ($table eq "person") { $starting_tab = "Identity-tab"; }
 		      $record_text = qq|<li class="table-list-element" id="$table-$rid">
-            <span title="Edit" onClick="openMain('$onclickurl','edit','$table','$rid');">$recordstatus <i class="fa fa-edit"></i></span>
+            <span title="Edit" onClick="openDiv('$onclickurl','main','edit','$table','$rid','$starting_tab','$starting_tab');">$recordstatus <i class="fa fa-edit"></i></span>
 						<span title="Delete" onClick="record_delete('$onclickurl','$table','$rid');"><i class="fa fa-cut"></i></span>
-					  <a href="#" onClick="openDiv('$onclickurl','Reader','show','$table','$rid');">$record_title</a></li>|;
+					  <a href="#" onClick="openDiv('$onclickurl','Reader','show','$table','$rid','Reader');">$record_title</a></li>|;
 			}
 			else {
 
@@ -1293,7 +1402,6 @@ sub format_content {
 	$wp->{page_linkcount} = 0;
 
 
-
 	&make_data_elements($wp->{page_content},$wp,$wp->{page_format});		# Fill page content elements
 	&make_boxes($dbh,\$wp->{page_content});						# Make Boxes
 	&make_counter($dbh,\$wp->{page_content});						# Make Boxes
@@ -1335,7 +1443,9 @@ sub format_content {
 	&make_site_hits_info(\$wp->{page_content});
 
 
-
+  # Insert person ID of person using the pages
+	my $pid = $Person->{person_id};
+	$wp->{page_content} =~ s/<person_id>/$pid/;
 
 
 						# Stylistic
@@ -1506,10 +1616,6 @@ sub format_record {
 
 
 
-	#$viewtext = " - ";
-	if ($view_text =~ /CampaignToBuildOneBigCampaign/ || $view_text =~ /Blacklock/ ||  $view_text =~ /One Big Campaign/ || $view_text =~ /feed\/408/) {
-		$view_text = " - ";
-  }
 
 	if ($diag>9) { print "/Format Record <br>"; }
 	return $view_text;											# Return the Completed Record
@@ -2456,11 +2562,14 @@ sub make_admin_links {
 								$replace .= qq|[$status]|;
 							}
 						}
+#    openDiv('<st_cgi>api.cgi','main','edit','feed','new','','Edit');">
+# 	[<a href="javascript:confirmDelete('$Site->{st_cgi}admin.cgi?$table=$id&action=Delete')">@{[&printlang("Delete")]}</a>]
 
-
+						my $onclickurl = $Site->{st_cgi}."api.cgi";
 						$replace .=  qq|
-						[<a href="$Site->{st_cgi}admin.cgi?$table=$id&action=edit">@{[&printlang("Edit")]}</a>]
-						[<a href="javascript:confirmDelete('$Site->{st_cgi}admin.cgi?$table=$id&action=Delete')">@{[&printlang("Delete")]}</a>]|;
+						[<a href="#" onClick="openDiv('$onclickurl','main','edit','$table','$id','','Edit');">@{[&printlang("Edit")]}</a>]
+
+					|;
 
 						if ($table eq "post") {
 							$replace .= qq|[<a href="javascript:confirmDelete('$Site->{st_cgi}admin.cgi?$table=$id&action=Spam')">@{[&printlang("Spam")]}</a>]|;
@@ -2861,10 +2970,12 @@ sub make_keywords {
 
 
 
+
 						# For Each keyword Command
 	my $escape_hatch=0; my $page_format = "";
 	while ($$text_ptr =~ /<keyword (.*?)>/ig) {
 		my $autocontent = $1; my $replace = ""; my $grouptitle = "";
+
 
 
 						# No endless loops, d'uh
@@ -2921,6 +3032,7 @@ sub make_keywords {
 		$sth -> execute();
 		$results_count=0;
 		my $results_in = "";
+
 
 		# get the list of coluns in this table (used by published_on_web()
 
@@ -3556,7 +3668,6 @@ sub auto_upload_image {
 	#----------------------------------------------------------------------
 sub make_thumbnail {
 
-
 	my ($dir,$img,$icondir,$iconname) = @_;
 
 
@@ -3568,20 +3679,14 @@ sub make_thumbnail {
 	my $dimf = $dir . $img;			# Full filename of original
 	my $domf = $icondir . $tmb;		# Full filename of new icon
 
-	my $image = Image::Magick->new;
-
-	my $error = $image->Read($dimf);
-	return "Error: reading $dimf image file: $error" if $error;
-
-	$error = $image->Resize(geometry=>'100x100');
-	return "Error: resizing image file: $error" if $error;
-
-	my $error = $image->Write($domf);
-	return "Error: writing $domf image file: $error" if $error;
-
-	return $tmb;
+  my $image = Image::Resize->new($dimf);
+	my $gd = $image->resize(100, 100);
+	open(FH, '>'.$domf);
+	print FH $gd->jpeg() or return "Error: writing $domf image file: $error";
+	close(FH);
 
 
+  return $tmb;   # Return full filename of icon
 }
 
 #           API INTEROP FUNCTIONS
@@ -3808,33 +3913,33 @@ sub api_receive_rest {
 sub main_window {
 
 	my ($tabs,$starting_tab,$table,$id_number,$data) = @_;
-	my $reader_hidden=0;  # Controls whether we're displaying the reader tab or not
 
-	# Create list of tabs (from input, from 'form' for this table, or by default)
-	my ($tab_list,$active,@fieldlist) = &get_tab_list($table);
-	if ($tab_list) { $tabs ||= [keys %$tab_list]; $starting_tab ||= $active; }
+  my $db = gRSShopper::Database->new({dbh=>$dbh});
+
+	my $window = gRSShopper::Window->new({
+		tabs => $tabs,
+		table=>$table,            				# Table being displayed in the window
+		id => $id_number,			  		  		# ID of record being displayed in the woindow
+    starting_tab => $starting_tab,		# Tab to display when window is opened
+		reader_hidden=>0,    							# Controls whether we're displaying the reader tab or not
+		db=>$db,                  				# Pointer to database functions
+		dbh=>$dbh,               					# Pointer to DBI database handler
+		data=>$data,                      # Data that accompanies the opening of the wiondow
+		person=>$Person,									# person opening the window
+		load=>1,													# Load record data
+	});
+
+	if ($window->{tab_list}) { $tabs ||= [keys %{$window->{tab_list}}]; $starting_tab ||= $window->{show_active}; }
 	else { $tabs ||= ['Edit','Upload','Preview','Publish']; $starting_tab ||= "Edit"; }
+
+
 
 	# Make sure we always have a Reader tab, hidden if not in use
 	unless (grep(/^Reader/i, @$tabs)) {
     unshift @$tabs,"Reader";
-		$reader_hidden=1;
+		$window->{reader_hidden} = 1;
   }
 
-	#print "Title: $data->{title} <br>";
-	#while (my($dx,$dy) = each %$data) { print "$dx = $dy <br>"; }
-
-	#my ($form_text,$preview_text,$pub_text,$upload_text,$preview_text) = &make_tabs_temp($dbh,$query,$table,$id_number,$data);
-	# Get Record
-		my $record; my $f;
-		if ($table && $id_number && $id_number > 0) { $record = &db_get_record($dbh,$table,{$table."_id" => $id_number}); }
-		elsif ($table && $data->{title}) {
-			my $tabletitle = $data->{title};
-			$record = &db_get_record($dbh,$table,{$table."_title" => $tabletitle}); }
-		if ($table && $id_number ne "none") { unless ($record) { # If Record doesn't exist, create a new empty record
-		 	$id_number = &make_new_record($table,$data) or &error("","","","Could not make a new $table record.");
-		 	$record = &db_get_record($dbh,$table,{$table."_id" => $id_number});
-		}}
 
 	# Initialize Tabs
 	my $form_tabs_tabs = qq|
@@ -3850,9 +3955,13 @@ sub main_window {
 	# For each tab, defined as a string in @tabs
 	foreach my $tab (@$tabs) {
 		  # Local because they much be changed by the tab command
-      my $tab_table = $table; my $tab_id = $id_number; my $tab_record = $record; my $tab_data = $data;
+
+      my $tab_table = $window->{table};
+			my $tab_id = $window->{record}->{id};
+			my $tab_record = $window->{record};
+			my $tab_data = $data;
 			my $tab_title = $tab; my $tab_div = $tab;
-			my $active = ""; if ($starting_tab eq $tab) { $active = " show active"; }
+			$window->{show_active} = ""; if ($starting_tab eq $tab) { $window->{show_active} = " show active"; }
 
 			# Run the function to get the content
 			my $tab_content="";
@@ -3879,17 +3988,19 @@ sub main_window {
 			# my $rh;	if ($tab eq "Reader" && $reader_hidden) {	$rh = qq|hidden="true"|; } # Hide tab if it's a hidden reader tab
 			$form_tabs_tabs .= qq|
 				<li class="nav-item">
-					 <a class="nav-link$active" id="$tab_div-tab" data-toggle="tab" href="#$tab_div"
+					 <a class="nav-link$window->{show_active}" id="$tab_div-tab" data-toggle="tab" href="#$tab_div"
 						role="tab" aria-controls="$tab_div" aria-selected="false" $rh>$tab_title</a></li>|;
 
-			# Creat the tab content
-			$tab_content = eval{ &$tabfunction($tab_list->{$tab},$tab_table,$tab_id,$tab_record,$tab_data) };
+			# Create the tab content
+#print "Tab content $tab_content : ".$window->{form_defined}." --- $tabfunction<br> ".$window->{tab_list}->{$tab}."<p>";
+
+			$tab_content = eval{ &$tabfunction($window,$tab_table,$tab_id,$tab_record,$tab_data,$defined) };
 			$tab_content = $@ if $@;
 
 			# Place the content into the content div
 			$form_tabs_content .= qq|
 			<!-- $tab -->
-			<div class="tab-pane fade $active" id="$tab_div" role="tabpanel" aria-labelledby="$tab_div-tab">
+			<div class="tab-pane fade $window->{show_active}" id="$tab_div" role="tabpanel" aria-labelledby="$tab_div-tab">
 				<div>$tab_content</div>
 			</div>|;
 
@@ -3931,7 +4042,7 @@ sub admin_frame {
 
 		$title ||= "Admin Title"; $content ||= "Admin Content";
 	#	print "Content-type: text/html; charset=utf-8\n\n";
-
+   print "Content-type: text/html\n\n";
 		print qq|
 	<!DOCTYPE html>
 	<html lang="en">
@@ -4007,7 +4118,7 @@ sub make_new_record {
 	#
 	# -------------------------------------------------------------------------
 sub Tab_Show {
-  my ($tbl,$tab_table,$tab_id,$tab_record,$tab_data) = @_;
+  my ($window,$tab_table,$tab_id,$tab_record,$tab_data,$defined) = @_;
 	unless ($tab_table) { return "Don't know which table to show."; exit;}
 	return unless (&is_allowed("view",$tab_table));
 	unless ($tab_id) { return "Don't know which ".$tab_table." number to show."; exit;}
@@ -4018,24 +4129,26 @@ sub Tab_Show {
 	exit;
 }
 sub Tab_Left_Sidebar {
+  my ($window) = @_;
 
- return qq|
- <!-- Open Sidebar Button -->
- <li class="nav-item"><span class="nav-link" style="cursor:pointer" data-toggle="tab" onclick="openNav()">
-	<img src="|.$Site->{st_url}.qq|assets/icons/grssicon.JPG" border=0 width=20
-	 alt="Open Sidebar" title="Open Sidebar"></span></li>|;
+ return qq|<!-- Open Sidebar Button --><li class="nav-item"><span class="nav-link" style="cursor:pointer" data-toggle="tab"
+onclick="openNav();"><i class="fa fa-database" style="color:green;font-size:1.2em;"></i></span></li><li
+class="nav-item"><span class="nav-link" style="cursor:pointer" data-toggle="tab"
+onclick="openDiv('|.$Site->{st_cgi}.qq|api.cgi','Reader','show','box','Start','Reader');"><img
+src="|.$Site->{st_url}.qq|assets/icons/grssicon.JPG" border=0 width=20 alt="Home" title="Home"></span></li>
+
+|;
 
 }
 sub Tab_Right_Sidebar {
+	my ($window) = @_;
 
+ # Open Main: url,cmd,db,id,title,starting_tab
  return qq|
  <!-- Open Sidebar Button -->
  <span class="nav-link" style="cursor:pointer;float:right!important;" data-toggle="tab"
-  onclick="openTalkNav()"><i class="fa fa-user" style="color:green;font-size:1.2em;"></i></span>
-
-
-  <span class="nav-link" style="cursor:pointer;float:right!important;" data-toggle="tab"
- onclick="openMain('|.$Site->{st_cgi}.qq|api.cgi','admin','general','','');"><i class="fa fa-gear" style="color:green;font-size:1.2em;"></i></span>
+  onclick="openTalkNav()"><i class="fa fa-user" style="color:green;font-size:1.2em;"></i></span><span class="nav-link" style="cursor:pointer;float:right!important;" data-toggle="tab"
+ onclick="openDiv('|.$Site->{st_cgi}.qq|api.cgi','main','admin','general','','','','General');"><i class="fa fa-gear" style="color:green;font-size:1.2em;"></i></span>
   |;
 
 }
@@ -4049,11 +4162,26 @@ sub Tab_Right_Sidebar {
 	# -------------------------------------------------------------------------
 sub Tab_Edit {
 
-	my ($tab_list,$table,$id_number,$record) = @_;
+	my ($window,$table,$id_number,$record,$data,$defined) = @_;
+	my ($window) = @_;
+
 	my $output = "";
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record);
+	#print "Content-type: text/html\n\n";
+
+  if ($id_number eq "me") { $id_number = $Person->{person_id}; }
+	foreach my $field (@{$window->{tab_list}->{Edit}}) {
+
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
+
+	$output .= qq|[<a href="#" onClick="dump_record(event)">Show Record Data</a>]<div id="record-dump"></div>|;
+
+	$output .= qq|
+	<script>function dump_record(e){\$(document).ready(function(){ e.preventDefault();\$('#record-dump').load("|.
+	   $Site->{st_cgi}.qq|api.cgi?cmd=dump&table=$table&id=$id_number");return false;});}</script>
+
+	|;
+
 	return  $output;
 
 }
@@ -4067,7 +4195,7 @@ sub Tab_Edit {
 	# -------------------------------------------------------------------------
 sub Tab_Import {
 
-	my ($tab_list,$table,$id_number,$record) = @_;
+	my ($window,$table,$id_number,$record,$data,$defined) = @_;
 
 	my $output = "";
   print "Database not initialized" unless ($dbh);
@@ -4075,7 +4203,8 @@ sub Tab_Import {
 	my $sth = $dbh -> prepare($stmt) or print "Error: $!".$sth->errstr();
 	$sth -> execute($table) or print "Error: $!".$sth->errstr();
 	while (my $showref = $sth -> fetchrow_hashref()) {
-		$output .= qq|<li><a href="#" onclick="openMain('|.$Site->{st_cgi}.qq|api.cgi','harvest','feed','|.$showref->{feed_id}.qq|');">|.$showref->{feed_title}.qq|</li>|;
+		 # Open Main: url,cmd,db,id,title,starting_tab
+		$output .= qq|<li><a href="#" onclick="openDiv('|.$Site->{st_cgi}.qq|api.cgi','main','harvest','feed','|.$showref->{feed_id}.qq|');">|.$showref->{feed_title}.qq|</li>|;
 	}
 	$sth ->finish();
 	unless ($output) { $output = "No import sources found for $table data."}
@@ -4092,10 +4221,10 @@ sub Tab_Import {
 # -------------------------------------------------------------------------
 sub Tab_Write {
 
-my ($tab_list,$table,$id_number,$record) = @_;
+my ($window,$table,$id_number,$record,$data,$defined) = @_;
 my $output = "";
-foreach my $field (@$tab_list) {
-	$output .= &process_field_types($table,$id_number,$field,$record);
+foreach my $field (@{$window->{tab_list}->{Write}}) {
+	$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 }
 return  $output;
 
@@ -4111,10 +4240,10 @@ return  $output;
 # -------------------------------------------------------------------------
 sub Tab_Reader {
 
-  my ($tab_list,$table,$id_number,$record) = @_;
+  my ($window,$table,$id_number,$record,$data,$defined) = @_;
   my $output = "";
-  foreach my $field (@$tab_list) {
-	  $output .= &process_field_types($table,$id_number,$field,$record);
+  foreach my $field (@{$window->{tab_list}->{Reader}}) {
+	  $output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
   }
   return  "Reader";
 
@@ -4130,11 +4259,11 @@ sub Tab_Reader {
 	# -------------------------------------------------------------------------
 sub Tab_Upload {
 
-	my ($tab_list,$table,$id_number,$record) = @_;
+	my ($window,$table,$id_number,$record,$data,$defined) = @_;
 	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record);
+	foreach my $field (@{$window->{tab_list}->{Upload}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 	return  $output;
 
@@ -4150,8 +4279,8 @@ sub Tab_Upload {
 	# -------------------------------------------------------------------------
 sub Tab_Preview {
 
-	my ($tab_list,$table,$id_number,$record) = @_;
-  $table ||= $vars-{table};
+	my ($window,$table,$id,$record,$data,$defined) = @_;
+  $table ||= $vars->{table};
 	$id ||= $vars->{id};
 	return "Permission Denied" unless (&is_viewable("admin",$vars->{table}));
 	unless ($table) { return "Don't know which table to preview."; exit;}
@@ -4175,11 +4304,11 @@ sub Tab_Preview {
 	# -------------------------------------------------------------------------
 sub Tab_Classify {
 
-	my ($tab_list,$table,$id_number,$record) = @_;
+	my ($window,$table,$id_number,$record,$data,$defined) = @_;
 
 	my $output = "";
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record);
+	foreach my $field (@{$window->{tab_list}->{Classify}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 	return  $output;
 }
@@ -4194,17 +4323,15 @@ sub Tab_Classify {
 	# -------------------------------------------------------------------------
 sub Tab_Publish {
 
-	my ($tab_list,$table,$id_number,$record) = @_;
+	my ($window,$table,$id_number,$record,$data,$defined) = @_;
 	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record);
+	foreach my $field (@{$window->{tab_list}->{Publish}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 	return  $output;
 
 }
-
-
 
 	# TABS ----------------------------------------------------------
 	# ------- Harvest --------------------------------------------
@@ -4216,7 +4343,7 @@ sub Tab_Publish {
 	# -------------------------------------------------------------------------
 sub Tab_Harvest {
 
-  my ($tab_list,$table,$id,$record,$data) = @_;
+  my ($window,$table,$id,$record,$data,$data,$defined) = @_;
   my $output = "<p>Source: ".$record->{$table."_title"}."</p>";
 
   my $sz = qq|width=10 height=10|;
@@ -4312,15 +4439,15 @@ sub Tab_Harvest {
 		</script>
 	|;
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id,$field,$record,$data);
+	foreach my $field (@{$window->{tab_list}->{Harvest}}) {
+		$output .= &process_field_types($window,$table,$id,$field,$record,$data,$defined);
 	}
-
-  $output .= qq|[<a href="#" onClick="openMain('$onclickurl','import','$table');">Import More |.ucfirst($table).qq| Data</a>] |;
+   # Open Main: url,cmd,db,id,title,starting_tab
+  $output .= qq|[<a href="#" onClick="openDiv('$onclickurl','main','import','$table');">Import More |.ucfirst($table).qq| Data</a>] |;
   $output .= qq|[<a href="#" id="harvester_functions_selection">Harvester Admin Functions</a>]|;
 	$output .= qq|<script>
 	              \$('#harvester_functions_selection').on('click',function(){
-								openMain('$apilink','admin','','','','Harvester');
+								openDiv('$apilink','main','admin','','','','Harvester');
 							});
 							</script>|;
   return  $output;
@@ -4335,13 +4462,15 @@ sub Tab_Harvest {
 	# -------------------------------------------------------------------------
 sub Tab_Page {
 
-	my ($tab_list,$table,$id_number,$record) = @_;
-	unless ($vars->{table} eq "page") { return "Page tab only works for pages.<br>You need to specify 'table=page&id=##' in your request."; exit;}
-	unless ($vars->{id}) { return "Don't know which page number to manage."; exit;}
+	my ($window,$table,$id_number,$record,$data,$defined) = @_;
+	$table ||= $vars->{table};
+	$id_number ||= $vars->{id_number};
+	unless ($table eq "page") { return "Page tab only works for pages.<br>You need to specify 'table=page&id=##' in your request."; exit;}
+	unless ($id_number) { return "Don't know which page number to manage."; exit;}
 	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record);
+	foreach my $field (@{$window->{tab_list}->{Page}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 
 	$output .= qq|<div id="publish">
@@ -4365,26 +4494,28 @@ sub Tab_Page {
 	# -------------------------------------------------------------------------
 sub Tab_Table {
 
-  my ($tab_list,$table,$id_number,$record,$data) = @_;
+  my ($window,$table,$id_number,$record,$data,$defined) = @_;
   my $output = "";
 
-  foreach my $field (@$tab_list) {
-	  $output .= &process_field_types($table,$id_number,$field,$record,$data);
+  foreach my $field (@{$window->{tab_list}->{Table}}) {
+	  $output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
   }
   return  $output;
 
 }
 sub Tab_Newsletter {
 
+	my ($window,$table,$id,$record,$defined) = @_;
+	my $output = "";
+
 	unless (&is_allowed("publish","page")) { return "Permission Denied"; exit; }
 	unless ($vars->{table} eq "page") { return "Newsletters only work for pages. <br>You need to specify 'table=page&id=##' in your request."; exit;}
 	unless ($vars->{id}) { return "Don't know which page number to manage."; exit;}
 
-	my ($tab_list,$table,$id_number,$record) = @_;
-	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record);
+
+	foreach my $field (@{$window->{tab_list}->{Newsletter}}) {
+		$output .= &process_field_types($window,$table,$id,$field,$record,$data,$defined);
 	}
 	return  $output;
 
@@ -4416,6 +4547,20 @@ sub Tab_Permissions {
    my $adminlink = $Site->{st_cgi}."admin.cgi";
    my $output = qq|<iframe style="border:0;width:100%;height:800px;" src="$adminlink?action=permissions"></iframe>|;
    return $output;
+
+}
+# TABS ----------------------------------------------------------
+# ------- Users --------------------------------------------
+#
+# Manage users
+#
+# -------------------------------------------------------------------------
+sub Tab_Users {
+
+ return "Permission Denied" unless (&is_viewable("admin","users"));
+ my $adminlink = $Site->{st_cgi}."admin.cgi";
+ my $output = qq|<iframe style="border:0;width:100%;height:800px;" src="$adminlink?action=users"></iframe>|;
+ return $output;
 
 }
   # TABS ----------------------------------------------------------
@@ -4496,12 +4641,13 @@ sub Tab_Newsletters {
 	# -------------------------------------------------------------------------
 sub Tab_Identity {
 
+
 	return "Permission Denied" unless (&is_viewable("edit","person"));
-	my ($tab_list,$table,$id_number,$record,$data) = @_;
+	my ($window,$table,$id_number,$record,$data) = @_;
 	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record,$data);
+	foreach my $field (@{$window->{tab_list}->{Identity}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 	return  $output;
 
@@ -4515,11 +4661,11 @@ sub Tab_Identity {
 sub Tab_Visibility {
 
 	return "Permission Denied" unless (&is_viewable("edit","person"));
-	my ($tab_list,$table,$id_number,$record,$data) = @_;
+	my ($window,$table,$id_number,$record,$data) = @_;
 	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record,$data);
+	foreach my $field (@{$window->{tab_list}->{Visibility}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 	return  $output;
 
@@ -4533,11 +4679,11 @@ sub Tab_Visibility {
 sub Tab_Location {
 
 	return "Permission Denied" unless (&is_viewable("edit","person"));
-	my ($tab_list,$table,$id_number,$record,$data) = @_;
+	my ($window,$table,$id_number,$record,$data) = @_;
 	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record,$data);
+	foreach my $field (@{$window->{tab_list}->{Location}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 	return  $output;
 
@@ -4551,11 +4697,11 @@ sub Tab_Location {
 sub Tab_Web {
 
 	return "Permission Denied" unless (&is_viewable("edit","person"));
-	my ($tab_list,$table,$id_number,$record,$data) = @_;
+	my ($window,$table,$id_number,$record,$data) = @_;
 	my $output = "";
 
-	foreach my $field (@$tab_list) {
-		$output .= &process_field_types($table,$id_number,$field,$record,$data);
+	foreach my $field (@{$window->{tab_list}->{Web}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
 	}
 	return  $output;
 
@@ -4616,7 +4762,7 @@ sub Tab_Database {
 
 
 	# Edit a Database
-
+   # Open Main: url,cmd,db,id,title,starting_tab
 	$content .= qq|
 	  <div>Select a database:
 			 <select id="database_table_selection" name="stable">
@@ -4627,7 +4773,7 @@ sub Tab_Database {
 	 <script>
 			\$('#database_table_selection').on('change',function(){
 			var content = \$('#database_table_selection').val();
-			openMain('$apilink','edit','form','',content,'Database');
+			openDiv('$apilink','main','edit','form','',content,'Database');
 			});
 	 </script>|;
 
@@ -4757,191 +4903,7 @@ sub Tab_Database {
 
 
 }
-sub make_tabs_temp {
 
-  my ($dbh,$query,$table,$id_number,$data) = @_;
-
-	# Initialize major form elements
-	my $form_text = "";				# Contents of the Edit Tab
-	my $preview_text = "";		# Contents of the Preview Tab
-	my $pub_text = "";				# Contents of the Publish Tab
-	my $newsletter_text = ""; # Contents of the Newsletter Tab
-	my $upload_text = "";			# Contents of the File Upload Tab
-	my $database_text = "";		# Contents of the Database Upload Tab
-
-
-
-
-	my $autoblog = $vars->{autoblog};
-	my $id; my $id_value;						# Not needed, but let's wipe out the value
-									# in case they're used accidentally. Heh
-
-
-
-
-
-
-
-
-	# Get Record
-
-	my $record; my $quotationtext; my $link; my $feed;
-	$record = &db_get_record($dbh,$table,{$table."_id" => $id_number});
-
-	# Remove spacings
-	$record->{$table."_description"} =~ s/<br\/>/\n/g;
-	$record->{$table."_content"} =~ s/<br\/>/\n/g;
-
-	# Print Messages
-	if ($vars->{msg}) { $form_text .=  qq|<p class="notice">$vars->{msg}</p>|; }
-
-
-	# Navigation
-
-	unless ($vars->{autoblog} || $vars->{app}) {
-		my $scripturl = $Site->{st_url}.$ENV{'REQUEST_URI'};
-		$form_text .= qq|<p class="nav">[<a href="$Site->{st_url}$table/$id_number">View |.ucfirst($table).qq|</a>] |;
-		$form_text .= qq|[<a href="$Site->{script}?db=$table&action=list">List All |.ucfirst($table).qq|s</a>] |;
-		$form_text .= qq|[<a href="$Site->{script}?db=$table&action=edit">Create New |.ucfirst($table).qq|</a>] |;
-		if ($table eq "feed") { $form_text .= qq|[<a href="$Site->{st_cgi}harvest.cgi?feed=$id_number&force=yes">Harvest Feed</a>]</p>|; }
-		$form_text .= qq|</p>|;
-	}
-
-	# Create Preview Versions
-	my $preview_text = &Tab_Preview($table,$id_number);
-
-		$look_tab_text .= qq|
-				<script>\$(document).ready(function(){\$('#record_look').load("admin.cgi?$table=$id_number&format=summary");});</script>
-				<div id="record_look"></div>|;
-
-		$form_text .= qq|<script>\$(document).ready(function(){\$('#preview-record-summary').load("|.$Site->{st_cgi}.qq|api.cgi?cmd=show&table=$table&id=$id&format=summary");});</script>
-				<br><i>&nbsp;&nbsp;Preview:</i><br/><table id="record_preview" border=1 cellpadding=10 cellspacing=0 style="color:#888888; width:95%">
-				<tr><td><div id="preview-record-summary"></div></td></tr></table><br>|;
-
-
-	# Create Form Heading for Old-Style (Raw) Form
-
-	if (defined($vars->{raw_form})) {
-
-		# Table and ID values
-		$form_text .=  qq|
-		 <form method="post" id="contenteditor" action="$Site->{script}" enctype="multipart/form-data">
-		 <input type="hidden" name="table" value="$table">
-		 <input type="hidden" name="id" value="$id_value">
-		 <input type="hidden" name="action" value="update">
-		 <input type="hidden" name="raw_form" value="1">|;
-
-		if ($vars->{autoblog}) {
-			$form_text .=  qq|
-			<input type="hidden" name="newautoblog" value="$vars->{autoblog}">|;
-		}
-
-
-
-		# Add hidden values from $data
-		while (my($dx,$dy) = each %$data) {
-			$form_text .=  qq|
-			<input type="hidden" name="$dx" value="$dy">|;
-		}
-	}
-
-
-
-
-	if ($autoblog) {
-		$form_text .= qq|<table border=0 cellpadding=10 cellspacing=0 style="color:#888888; width:95%"><tr><td>
-			<i>Full text of the link you are commenting on is located below the form</i></td></tr></table>|;
-	}
-
-
-	if ($vars->{app}) {
-
-	} else {
-
-	 $form_text .= qq|<table border=1 cellpadding=10 cellspacing=0 style="color:#888888; width:95%">\n|;
-	 }
-
-
-	# Get the full list of tables, for crosslinks
-	my @db_tables = &db_tables($dbh);
-
-	# Find the list for fields to display...
-  my ($tab_list,$active,@fieldlist) = &get_tab_list($table);
-
-	# If the form table doesn't exist, or doesn't have a record for $table, or is over-ridden in options...
-	@fieldlist = &auto_generate_fieldlist($table) unless (@fieldlist);
-
-	# Process each field in @fieldlist in turn
-
-	my $rowcounter = 0;
-	foreach my $f (@fieldlist) {
-
-		# Skip headings in Form data table
-		$rowcounter++;
-
-		$output .= &process_field_types($table,$id_number,$f,$record);
-
-
-
-
-	}
-
-
-	unless ($vars->{app}) {
-
-	$form_text .=  &form_submit();
-	$form_text .=  "</table>\n";
-
-
-
-
-	# link to Edit Raw Data
-	if (defined($vars->{raw_data})) {
-		$form_text .= qq|<span class="small_nav">[<a href="|.
-			$Site->{st_cgi}.qq|admin.cgi?$table=$id_value&action=edit">Predefined Form</a>]</span>|;
-	} else {
-		$form_text .= qq|<span class="small_nav">[<a href="|.
-			$Site->{st_cgi}.qq|admin.cgi?$table=$id_value&action=edit&raw_data">Edit Raw Data</a>]</span>|;
-	}
-
-
-	# link to Use Old Style (Raw) Form
-	if (defined($vars->{raw_form})) {
-		$form_text .= qq|<span class="small_nav">[<a href="|.
-
-			$Site->{st_cgi}.qq|admin.cgi?$table=$id_value&action=edit">In-Line Editing</a>]</span>|;
-	} else {
-		# link to Use Old Style (Raw) Form
-		$form_text .= qq|<span class="small_nav">[<a href="|.
-			$Site->{st_cgi}.qq|admin.cgi?$table=$id_value&action=edit&raw_data&raw_form">Form Not Working?</a>]</span>|;
-	}
-
-	}
-
-	# Some Autoblog Code; fix later
-
-	if ($autoblog) {
-		my $link = db_get_record($dbh,"link",{link_id=>$autoblog});
-		$form_text .= qq|
-			<br><table border=0 cellpadding=10 cellspacing=0 width="600">
-			<tr><td>
-			<i>Link Text:</i><br/><br/>
-			$link->{link_description} <hr>
-			$link->{link_content}
-			<br>
-			<a href="$link->{link_link}" target="_new">Open link in a new window</a>
-			</td></tr></table><br>\n|;
-
-	}
-
-
-	$form_text .= &form_page_options($table,$id_number,$record);
-				$form_text .= &form_badge_options($table,$id_number,$record);
-	$form_text .= "</form>\n";
-
-  return ($form_text,$preview_text,$pub_text,$upload_text,$preview_text);
-
-}
 sub get_tab_list {
 
   my ($table) = @_;
@@ -4950,6 +4912,7 @@ sub get_tab_list {
   my @fieldlist;
 	my $tablist;
 	my $active;
+	my $defined = 0;		# Flag set if this table has a form defined, 0 if this form is set using default values
 
 	if (&db_table_exist($dbh,"form")) {
 
@@ -4962,6 +4925,7 @@ sub get_tab_list {
 			my $table_data = &db_get_single_value($dbh,"form","form_data",$tableid);
 			$table_data =~ s/\n//g;
 			@fieldlist = split /;/,$table_data;
+			$defined = 1;
 
 		} else {
 					@fieldlist = &auto_generate_fieldlist($table);
@@ -4985,7 +4949,7 @@ sub get_tab_list {
 			}
 	}
 
-	return ($tablist,$active,@fieldlist);
+	return ($tablist,$active,$defined,@fieldlist);
 
 }
 sub auto_generate_fieldlist {
@@ -5041,7 +5005,7 @@ sub auto_generate_fieldlist {
 }
 sub process_field_types {
 
-  my ($table,$id_number,$field,$record,$data) = @_;
+  my ($window,$table,$id_number,$field,$record,$data) = @_;
 
 	return if ($field eq "Placeholder to make sure tab is found");
 
@@ -5064,6 +5028,12 @@ sub process_field_types {
 	# Keylist
 	if ($fieldtype eq "keylist") { $output .= &form_keylist($table,$id_number,$sc); }
 
+	# Password
+	elsif ($fieldtype eq "password") {
+		$output .= "password";
+		#$output .= &form_textarea_input($table,$id_number,$col,$value,$fieldsize,$advice); }
+
+	}
 	# Textarea Input
 	elsif ($fieldtype eq "textarea_input") {
 		$output .= &form_textarea_input($table,$id_number,$col,$value,$fieldsize,$advice); }
@@ -5087,7 +5057,9 @@ sub process_field_types {
 	elsif ($fieldtype eq "rules") { $output .= &form_rules($table,$id_number,$col,$value,$fieldsize,$advice); }
 
 	# Option List (Selections defined in the'optlist' table; defaults to varchar if options are missing)
-	elsif ($fieldtype eq "optlist") { $output .=  &form_optlist($table,$id_number,$col,$value,$fieldsize,$advice,$fieldlable,1); }
+
+	elsif ($fieldtype eq "optlist") {
+		 $output .=  &form_optlist($window,$table,$id_number,$col,$value,$fieldsize,$advice,$fieldlable,$defined,1); }
 
 	# Data  - each line ; delimited  and individual items , delimited. First line is data headers
 	elsif ($fieldtype eq "data") { $output .=  &form_data($col,$record->{$col},$id_number,$table); }
@@ -5243,12 +5215,21 @@ sub form_textarea {
 
 
 		<script>
+			var timer_|.$col.qq|;
 			\$('#|.$col.qq|').on('change',function(){
-				  var content = \$('#|.$col.qq|').val();
+
+				// do stuff only when user has been idle for 1 second
+  				clearTimeout(timer_|.$col.qq|);
+ 				timer_|.$col.qq| = setTimeout(function() {
+
+					var content = \$('#|.$col.qq|').val();
 					var url = "$url";
 					submit_function(url,"$table","$id","$col",content,"textarea");
 					var previewUrl = url+"?cmd=show&table=$table&id=$id&format=summary";
 					\$('#Preview').load("previewUrl");
+
+				 }, 1000);
+
 			});
 		</script>
 
@@ -5312,13 +5293,24 @@ sub form_wysihtml {
 
 
     var editor = CKEDITOR.instances['|.$col.qq|'];
+    var timer_|.$col.qq|;
+
+
 			editor.on('change',function(){
-				  var url = "$url";
-				  var editor = CKEDITOR.instances['|.$col.qq|'];
-			  	var content = editor.getData();
+
+				// do stuff only when user has been idle for 1 second
+  				clearTimeout(timer_|.$col.qq|);
+ 				timer_|.$col.qq| = setTimeout(function() {
+
+					// Submit Changed Content
+					var url = "$url";
+					var editor = CKEDITOR.instances['|.$col.qq|'];
+					var content = editor.getData();
 					submit_function(url,"$table","$id","$col",content,"textarea");
 					var previewUrl = url+"?cmd=show&table=$table&id=$id&format=summary";
 					\$('#Preview').load("previewUrl");
+
+				 }, 1000);
 			});
 
 		</script>
@@ -5628,6 +5620,7 @@ sub form_file_select {
         });
     }).on('fileuploadfail', function (e, data) {
         \$.each(data.files, function (index) {
+					alert("hit it");
             var error = \$('<span class="text-danger"/>').text('File upload failed.');
             \$(data.context.children()[index])
                 .append('<br>')
@@ -5815,7 +5808,8 @@ sub form_graph_list {
 		next unless ($keyid > 0);
 		my $keyname = &get_key_name($key,$keyid);
 		if ($admin) {
-			$editlink = qq|[<a href="#" onClick="openMain('$onclickurl','edit','$key','$keyid');">Edit</a>] |;
+			 # Open Main: url,cmd,db,id,title,starting_tab
+			$editlink = qq|[<a href="#" onClick="openDiv('$onclickurl','main','edit','$key','$keyid','','Edit');">Edit</a>] |;
 			#$editlink = qq|[<a href="$Site->{st_cgi}admin.cgi?$key=$keyid&action=edit">Edit</a>]|;
 			$removelink = qq|[<a href="#" onClick="removeKey('$onclickurl','$table','$id','$key','$keyid');">Remove</a>] |;
 			#$removelink = qq| [<a href="$Site->{st_cgi}admin.cgi?table=$table&id=$id&remove=$key/$keyid&action=remove_key">Remove</a>]|;
@@ -6046,7 +6040,8 @@ sub form_yesno {
 sub form_optlist {
 
 	# Organize field data
-	my ($table,$id,$col,$selected_value,$fieldsize,$advice,$fieldlable,$ajax) = @_;
+
+	my ($window,$table,$id,$col,$selected_value,$fieldsize,$advice,$fieldlable,$defined,$ajax) = @_;
 
 
 	# Find eligible options
@@ -6081,7 +6076,7 @@ sub form_optlist {
 
 
 	if ($ajax) {
-	    return form_select($table,$id,$col,$selected_value,$fieldsize,$advice,$options,$fieldlable);
+	    return form_select($window,$table,$id,$col,$selected_value,$fieldsize,$advice,$options,$fieldlable);
 	} else {
 	    return qq|$option_lables|;
 	}
@@ -6096,11 +6091,13 @@ sub form_optlist {
 	# -------------------------------------------------------------------------
 sub form_select {
 
-	my ($table,$id,$col,$selected_value,$fieldsize,$advice,$options,$fieldlable) = @_;
+	my ($window,$table,$id,$col,$selected_value,$fieldsize,$advice,$options,$fieldlable,$defined) = @_;
+	unless ($window->{form_defined}) { $fieldsize=1;}
+
   my $url = $Site->{st_cgi}."api.cgi";
   if ($fieldlable) { $fieldlable = qq|<span class="fieldlable" id="$col-fieldlable">$fieldlable</span>|;}
-	my $multiple; if ($fieldsize>1) { $multiple = " multiple size=$fieldsize";}
-
+	my $multiple; if ($window->{form_defined} && $fieldsize>1) { $multiple = " multiple size=$fieldsize";}
+  if ($defined) { $defined = "defined";} else { $defined = "undefined"; }  #Was this field defined in a form table for the current table
   # Uses plugin from
 	# https://www.jqueryscript.net/form/Bootstrap-Plugin-To-Convert-Select-Boxes-Into-Button-Groups-select-togglebutton-js.html
 
@@ -6110,6 +6107,7 @@ sub form_select {
 	      <div class="row form-group" style="margin-left:5px;"> <select id="$col" $multiple>$options</select></div>
 		 </div><div id="|.$col.qq|_result"></div>
 		 <script>
+
 		    \$('#|.$col.qq|').togglebutton();
  		    \$('#|.$col.qq|').on('change', function(e) {
  	    		var newval = \$('#|.$col.qq|').val();
@@ -6347,6 +6345,7 @@ sub form_database {
 	my $table_option_list = &table_option_list($stable);
   my $onclickurl = $Site->{st_cgi}."api.cgi";
 
+  # Open Main: url,cmd,db,id,title,starting_tab
 	return qq|
 
 	        <div id="submit_columns_result"></div>
@@ -6361,10 +6360,10 @@ sub form_database {
 					<script>
 							\$('#database_table_selection').on('change',function(){
 							  var content = \$('#database_table_selection').val();
-								openMain('$onclickurl','edit','form','',content);
+								openDiv('$onclickurl','main','edit','form','',content,'','Database');
 						  });
 							\$('#database_functions_selection').on('click',function(){
-								openMain('$onclickurl','admin','database','','');
+								openDiv('$onclickurl','main','admin','database','','','Database');
 							});
 					</script>|;
 }
@@ -6841,7 +6840,8 @@ sub validate_column_sizes {
    my ($type,$size) = @_;
 
    # Limit allowed column types - this could probably be expanded but will do for now
-	 die "invalid column type" unless ($type =~ /text|longtext|varchar|int|bit|tinyint|date|datetime|blob/i);
+	 $type ||= "text";
+	 die "invalid column type $type" unless ($type =~ /text|longtext|varchar|int|bit|tinyint|date|datetime|blob/i);
 
 	 if ($type eq "int") {
 			$size ||= 10;
@@ -7202,6 +7202,7 @@ sub db_get_column {
 	my $names_ref = $dbh->selectcol_arrayref($stmt);
 	return $names_ref;
 }
+
 
 	# -------   Get Record Cache --------------------------------------------------------
 	# Cache is a pre-assembled version of complex records all ready for display
@@ -8239,6 +8240,87 @@ sub save_graph {
 	return;
 
 
+
+}
+
+# Add a new graph entry
+
+sub graph_add {
+
+	my ($tabone,$idone,$tabtwo,$idtwo,$type,$typeval) = @_;
+
+	# Return if it already exists
+	if (&db_locate($dbh,"graph",{
+		graph_tableone=>$tabone, graph_idone=>$idone,
+		graph_tabletwo=>$tabtwo, graph_idtwo=>$idtwo} ))
+		{ return "Exists"; }
+
+  # Otherwise, Create Entry
+	my $graphid = &db_insert($dbh,$query,"graph",{
+		graph_tableone=>$tabone, graph_idone=>$idone,
+		graph_tabletwo=>$tabtwo, graph_idtwo=>$idtwo,
+		graph_creator=>$creator, graph_crdate=>$crdate, graph_type=>$type, graph_typeval=>$typeval});
+
+	return $graphid;
+}
+
+# remove a graph Entry
+
+sub graph_delete {
+
+		my ($tabone,$idone,$tabtwo,$idtwo,$type) = @_;
+    my $return = 0;
+
+		if ($type) {
+
+			while (my $graphid = &db_locate($dbh,"graph",{
+				graph_tableone=>$tabone, graph_idone=>$idone,
+				graph_tabletwo=>$tabtwo, graph_idtwo=>$idtwo, graph_type=>$type} )){
+
+				   &db_delete($dbh,"graph","graph_id",$graphid);
+					 $return = 1;
+
+			}
+
+
+		} else {
+
+			while (my $graphid = &db_locate($dbh,"graph",{
+				graph_tableone=>$tabone, graph_idone=>$idone,
+				graph_tabletwo=>$tabtwo, graph_idtwo=>$idtwo} )){
+
+					&db_delete($dbh,"graph","graph_id",$graphid);
+					$return = 1;
+
+			}
+
+	  }
+	  $return;
+}
+
+# Get a list of graph items related to a graph items
+sub graph_list {
+
+	my ($tableone,$idone,$tabletwo,$type) = @_;
+
+  $tableone =~ s/'//g;$type =~ s/'//g;	# Just in case
+	$tableone =~ s/;//g;$type =~ s/;//g;
+
+	my $stmt;
+
+	# One way
+	if ($type) { $stmt = qq|SELECT graph_idtwo FROM graph WHERE graph_tableone='$tableone' AND graph_idone='$idone' AND graph_type='$type'|; }
+	else { $stmt = qq|SELECT graph_idtwo FROM graph WHERE graph_tableone='$tableone' AND graph_idone='$idone' |; }
+	my $names_ref = $dbh->selectcol_arrayref($stmt);
+
+	# Reverse way
+	if ($type) { $stmt = qq|SELECT graph_idone FROM graph WHERE graph_tabletwo='$tableone' AND graph_idtwo='$idone' AND graph_type='$type'|; }
+	else { $stmt = qq|SELECT graph_idone FROM graph WHERE graph_tableone='$tableone' AND graph_idtwo='$idone'|; }
+	my $names_ref_two = $dbh->selectcol_arrayref($stmt);
+
+  # Join them (ignoring duplicates)
+	push(@$names_ref, @$names_ref_two);
+	return @$names_ref;
 
 }
 
@@ -9397,7 +9479,11 @@ sub error_inline {
 #
 sub login_needed {
 
-  my $url = $Site->{st_cgi}."api.cgi";
+  my $url = $Site->{st_cgi}."login.cgi?action=login_text";
+	my $script = $Site->{script};
+	print "Content-type: text/html\n";
+	print "Location: $url&refer=$script\n\n";
+	exit;
   print qq|
 	<button type="button" class="btn btn-primary" data-toggle="modal" data-target="#loginModal">Login</button>
 	|;
@@ -9631,7 +9717,7 @@ sub send_email {
 
 	my ($to,$from,$subj,$page) = @_;
 
-	   $page = "Content-Type: text/html; charset=utf-8\n\n".$page;
+
    my $page_text = $page;
 
    $page_text =~ s/<head(.*?)head>//sig;
@@ -11138,7 +11224,7 @@ package gRSShopper::Site;
 
   	# Check whether URLs are https or http
   	my $http;
-  	if ($self->{st_secure}) { $http = "https://" } else { $http = "http://"; }
+  	if ($self->{st_secure} || $self->{secure}) { $http = "https://" } else { $http = "http://"; }
 
 	# Determine site URL from HTTP or Cron
   	my $numArgs = $#ARGV + 1;
@@ -11147,7 +11233,7 @@ package gRSShopper::Site;
   	if ($ENV{'HTTP_HOST'}) {
   		$self->{st_host} = $ENV{'HTTP_HOST'};
    		$self->{script} = $ENV{'SCRIPT_URI'};
-		unless ($self->{script}) {  $self->{script} = $ENV{'SERVER_NAME'}.$ENV{'SCRIPT_NAME'}; }
+		unless ($self->{script}) {  $self->{script} = $http . $ENV{'SERVER_NAME'}.$ENV{'SCRIPT_NAME'}; }
 
   	}
 
@@ -11172,8 +11258,8 @@ package gRSShopper::Site;
    	# Set Default Directories
 	# Assign or override defaults
 	$self->{site_language}  ||= 'en';
-	$self->{st_urlf}  ||= '/var/www/html/';
-	$self->{st_cgif}  ||= '/var/www/cgi-bin/';
+	$self->{st_urlf}  ||= '../';
+	$self->{st_cgif}  ||= './';
 
   }
 
@@ -11195,7 +11281,10 @@ package gRSShopper::Site;
 	# Initialize if file can't be found or opened
 
   	my $data_file = $self->{data_dir} . "multisite.txt";
-	open IN,"$data_file" or $self->__initialize("file");  # -------------------------------------------------------------> Initialize file
+		unless (-e $data_file) { $data_file = $ARGV[2]; }    # try a backup option (nneded for cron)
+	  open IN,"$data_file" or die "Cannot find $data_file to define website parameters.";
+
+		#$self->__initialize("file");  # -------------------------------------------------------------> Initialize file
 
 
 	# Find the line beginning with site URL
@@ -11221,13 +11310,13 @@ package gRSShopper::Site;
 
 
 	# Initialize if line beginning with site URL can't be found
-	unless ($url_located) { $self->__initialize("url"); } # -------------------------------------------------------------> Initialize url
+	unless ($url_located) { die "line beginning with site URL can't be found"; $self->__initialize("url"); } # -------------------------------------------------------------> Initialize url
 
 
 	# Assign or override defaults
 	$self->{site_language}  ||= 'en';
-	$self->{st_urlf}  ||= '/var/www/html';
-	$self->{st_cgif}  ||= '/var/www/cgi-bin/';
+	$self->{st_urlf}  ||= '../';
+	$self->{st_cgif}  ||= './';
 	return;
   }
 
@@ -11285,6 +11374,11 @@ package gRSShopper::Site;
   	# Set default language
   	$self->{site_language} ||= "en";
 
+      # Find location of language pack directory
+	use File::Basename;
+      my $dirname = dirname(__FILE__);
+      $dirname .= "/";
+
   	# Cycle through list of languages from multisite.txt (separated by commas)
   	my @languages = split /,/,$self->{site_language};
 	foreach my $lang (@languages) {
@@ -11294,15 +11388,16 @@ package gRSShopper::Site;
 		unless ($self->{lang_user}) { $self->{lang_user} = $lang; }
 
 		# Determine language file name, this is where translations are stored
-		my $lang_filename = $self->{st_cgif} . "languages/".$lang . ".pl";
+		my $lang_filename = $dirname . "languages/".$lang . ".pl";
 
 		# Execute the language file (stores translations into a hash)
 		if (-e $lang_filename) {
 			open LIN,"$lang_filename" or die "Language file $lang_filename not found.";
 			while (<LIN>) {
 				my $l = $_;
+
 				$l =~ m/'(.*?)'(.*?)('|")(.*?)('|")/;
-				$self->{$lang}->{$1} = $4;
+				if ($1) { $self->{$lang}->{$1} = $4;  }
 
 			}
 			close LIN;
@@ -11320,7 +11415,7 @@ package gRSShopper::Site;
 
   	my ($self,$cmd) = @_;
 
-	unless ($ENV{'SCRIPT_NAME'} =~ /(admin|initialize)/) { $self->__site_maintenance($self->{st_home}); }
+	#unless ($ENV{'SCRIPT_NAME'} =~ /(admin|initialize)/) { $self->__site_maintenance($self->{st_home}); }
 	if ($cmd) {
 		print "Content-type: text/html\n";
 		print "Location:initialize.cgi?action=".$cmd."\n\n";
@@ -11329,6 +11424,15 @@ package gRSShopper::Site;
 	die "Unexplained failure to initialize.";
 
   }
+
+
+
+sub __site_maintenance {
+
+
+   return;
+
+}
 
 	#----------------------------------------------------------------------------------------------------------
 	#
@@ -11427,17 +11531,17 @@ package gRSShopper::File;
   }
  1;
 
-	#----------------------------------------------------------------------------------------------------------
-	#
-	#                                             gRSShopper::Record;
-	#
-	#----------------------------------------------------------------------------------------------------------
-	#
-	#  Create using tag:  $item = gRSShopper::Record->new({tag=>'tagname'});
-	#  Tags are associated with different types of record: feed, link, content, media, author, event
-package gRSShopper::Record;
 
-  # $item = gRSShopper::Record->new("count",$itemcount);
+
+	#----------------------------------------------------------------------------------------------------------
+	#
+	#                                             gRSShopper::Database;
+	#
+	#----------------------------------------------------------------------------------------------------------
+package gRSShopper::Database;
+
+  #  $Person = gRSShopper::Person->new({person_title=>'title',person_password=>'password'});
+  # Note that password will be encrypted in save
 
 
   use strict;
@@ -11445,164 +11549,261 @@ package gRSShopper::Record;
   our $VERSION = "1.00";
 
 
-  sub new {
-  	my($class, %args) = @_;
+
+sub new {
+  	my($class, $args) = @_;
    	my $self = bless({}, $class);
+   	while (my($ax,$ay) = each %$args) {
+   		#print "$ax = $ay <br>";
+   		$self->{$ax} = $ay;
 
-
-
-	foreach ( keys %args ) { $self->{$_} = $args{$_}; }					# Import values from call
-
-  my $rep = "<b>New Record</b><br>";
-	while (my ($rx,$ry) = each %$self) { $rep .= qq|$rx = $ry <br>|; }
-	$self->diag(7,qq|<div class="data">$rep</div>|);
-
-     	unless ($self->{type}) {
-     		if ($self->{tag}) { $self->set_type($self->{tag}); }
-	}
-
-	if ($self->{parent}->{type}) {
-
-		&flow_values($self->{parent},$self->{parent}->{type},$self,$self->{type});	# Inherit values from the parent
-	}											# Actual values may override
-
-
- 	return $self;
-  }
-
-  sub set_type {
-	my $self = shift;
-	my ($tag) = @_;
-	return unless ($tag);
-	if ($tag =~ /(^feed$|^channel$)/i) { $self->{type} = "feed"; }
-	elsif ($tag =~ /(^item$|^entry$)/i) { $self->{type} = "link"; }
-	elsif ($tag =~ /(^content$|^description$)/i) { $self->{type} = "content"; }
-	elsif ($tag =~ /(^author$|^dc:creator$)/i) { $self->{type} = "author"; }
-	elsif ($tag =~ /(^media$|^media:content$)/i) { $self->{type} = "media"; }
-	elsif ($tag =~ /(^event$)/i) { $self->{type} = "event"; }
+    }
+		return $self;
 
   }
 
 
-  #----------------------------- Flow Values ------------------------------
-  #
-  #  Flow values from one type of record to another
-  #  Eg., fill empty valies in a link with values from the feed
-  #  Used to initialize record values
 
 
-   sub flow_values {
+		# -------   Columns -----------------------------------------------------------
+sub db_columns {
 
-	my ($from,$from_prefix,$to,$to_prefix) = @_;
 
-	while (my ($fx,$fy) = each %$from) {
-		my $fprefix = $from_prefix."_";
-		my $tprefix = $to_prefix."_";
-		next unless ($fx =~ /$fprefix/i);					# Only flow through record values (signified by the presence of the prefix)
-		next if ($to_prefix =~ /feed_/);					# Never flow *to* feed
-		next if ($fx =~ /_id$/i);							# Never flow-through ID
-		next if ($fx =~ /_type$/i);							# Never flow-through type
+		my ($self,$table) = @_;			# Get a list of columns
 
-		if ($fx =~ /genre|section|author|publisher|title|descxription/) {		# Limited list of flow-through values
-			my $tx = $fx;												# These are intended to be defaults and
-			$tx =~ s/$fprefix/$tprefix/ig;									# re over-written by actual discovered values
-			$to->{$tx} ||= $from->{$fx};
+		my $dbh = $self->{dbh};
+		die "Database not ready in db_columns" unless ($dbh);
+		die "No table defined in db_columns" unless ($table);
+
+
+		my @columns = ();
+		my $showstmt = "SHOW COLUMNS FROM $table";
+
+		my $sth = $dbh -> prepare($showstmt);
+		$sth -> execute();
+		while (my $showref = $sth -> fetchrow_hashref()) {
+			push @columns,$showref->{Field};
 		}
-	}
-
-
-
-   }
-
-
-
-
-  sub load_from_db {
-
-    my $self = shift;
-    my ($dbh,$id) = @_;
-
-    unless ($self->{type}) { $self->{error} = "Record type not defined on load from db"; return 0; }
-    my $idfield = $self->{type}."_id";
-    my $stmt = "SELECT * FROM $self->{type} WHERE $idfield=? LIMIT 1";
-    my $sth = $dbh -> prepare($stmt);
-    $sth -> execute($id);
-    my $data = $sth -> fetchrow_hashref();
-    $sth->finish(  );
-    unless ($data) { $self->{error} = "$self->{type} '$id' not found in database."; return 0; }
-    while (my($dx,$dy) = each %$data) { $self->{$dx} = $data->{$dx}; }
-    return 1;
-  }
-
-  #
-  #   Add a value to the end of a list of values in an element
-  #   Delimeter defaults to ;
-
-
-  # Adding values to elements
-
-  sub set_value {
-
-	my ($self,$tag,$con) = @_;
-	$self->{$tag} = $con; 					# Just set a value, eg. title
-	$self->{$self->{type}."_".$tag} = $con;   		# Set a value for db storage, eg. feed_title
-  }
-
-  sub extend_list {
-
-	my ($self,$tag,$con,$delimiter) = @_;
-	$delimiter ||= ";";
-	if ($con) {
-		if ($self->{$tag}) { $self->{$tag} .= $delimiter; }  	# Just set a value, eg. title
-		$self->{$tag} .= $con;
-									# Set a value for db storage, eg. feed_title
-		if ($self->{$self->{type}."_".$tag}) { $self->{$self->{type}."_".$tag} .= $delimiter; }
-		$self->{$self->{type}."_".$tag} .= $con;
+		return @columns;
 
 	}
-  }
 
-    sub do_not_replace {
+	# -------   Get Column --------------------------------------------------------
+sub db_get_column {
 
-	my ($self,$tag,$con) = @_;
-	unless ($self->{$tag}) { $self->{$tag} = $con; 	}	# Just set a value, eg. title
-	unless ($self->{$self->{type}."_".$tag}) {
-		$self->{$self->{type}."_".$tag} = $con;   }		# Set a value for db storage, eg. feed_title
-  }
+	my ($self,$table,$field) = @_;
 
-  sub target {
-	my $self = shift;
-	if( @_ ) {
-		my $target = shift;
-      	$self->{target} = $target;
-	}
-	return $self->{target};
-  }
+	my $dbh = $self->{dbh};
+	die "Database not ready in db_get_columne" unless ($dbh);
 
-
-  sub to_string {
-   	my $self = shift;
-   	return $self->{page_content};
-  }
-
-  sub print {
-  	my $self = shift;
-   	print $self->to_string(), "\n";
-  }
-	# -------  Conditional print -------------------------------------------------------
-sub diag {
-
-	# $diag_level set at top
-
-	my ($self,$score,$output) = @_;
-  return unless($self->{diag_level});
-	if ($score <= $self->{diag_level}) {
-		print $output;
-	}
-
-	return;
+	my $stmt = qq|SELECT $field FROM $table|;
+	my $names_ref = $dbh->selectcol_arrayref($stmt);
+	return $names_ref;
 }
- 1;
+
+
+	# -------   Get Single Value--------------------------------------------------------
+sub db_get_single_value {
+
+	my ($self,$table,$field,$id,$sort,$cmp) = @_;
+
+	my $dbh = $self->{dbh};
+	die "Database not ready in db_get_single_value" unless ($dbh);
+
+	&error($dbh,"","","Database not initialized in get_single_value") unless ($dbh);
+	&error($dbh,"","","Table not initialized in get_single_value") unless ($table);
+	unless ($sort) { &error($dbh,"","","Field not initialized in get_single_value") unless ($field); }
+	#&error($dbh,"","","ID number not initialized in get_single_value") unless ($id);
+	return unless ($id || $sort);
+
+	my $idfield = $table."_id";								# define id field name
+	my $t = $table."_";unless ($field =~ /$t/) { $field = $t.$field; }	# Normalize field field name
+	if ($sort) { $sort = "ORDER BY $sort"; }
+	my $where; if ($idfield && $id) {
+		if ($cmp eq "lt" && $id>0) { $where = qq|WHERE $idfield<$id|; }
+		elsif ($cmp eq "gt" && $id>0) { $where = qq|WHERE $idfield>$id|; }
+		else { $where = qq|WHERE $idfield='$id'|; }
+	}
+
+	my $stmt = qq|SELECT $field FROM $table $where $sort LIMIT 1|; 	# Perform SQL
+	my $ary_ref = $dbh->selectcol_arrayref($stmt);
+	my $ret = $ary_ref->[0];
+
+	return $ret;
+
+}
+
+# -------   Get Record -------------------------------------------------------------
+sub db_get_record {
+
+	my ($self,$table,$value_arr) = @_;
+
+	my $dbh = $self->{dbh};
+
+	die "Database not ready in db_get_record" unless ($dbh);
+	die "Table not defined in db_get_record" unless ($table);
+
+	my @value_list; my @value_vals;
+	while (my($kx,$ky) = each %$value_arr) { push @value_list,"$kx=?"; push @value_vals,$ky; }
+	my $value_str = join " AND ",@value_list;
+	unless ($value_vals[0]) { warn "No value input to db_get_record"; return; }
+	my $stmt = "SELECT * FROM $table WHERE $value_str LIMIT 1";
+	my $sth = $dbh -> prepare($stmt);
+	$sth -> execute(@value_vals);
+	my $ref = $sth -> fetchrow_hashref();
+	$sth->finish(  );
+
+	return $ref;
+}
+
+# -------   Insert --------------------------------------------------------
+
+# Adapted from SQL::Abstract by Nathan Wiger
+sub db_insert {		# Inserts record into table from hash
+
+
+	my ($self,$table,$input) = @_;
+
+  my $dbh = $self->{dbh};
+  die "Database not ready in db_insert" unless ($dbh);
+  die "No table provided for db_insert" unless ($table);
+  die "No input data provided for db_insert" unless ($input);
+
+  # Filter  input hash to contain only columns in given table
+	my $data= $self->db_prepare_input($table,$input);
+
+  # Prepare SQL Statement
+	my $sql   = "INSERT INTO $table ";
+	my(@sqlf, @sqlv, @sqlq) = ();
+	for my $k (sort keys %$data) {
+		push @sqlf, $k;
+		push @sqlq, '?';
+		push @sqlv, $data->{$k};
+	}
+	$sql .= '(' . join(', ', @sqlf) .') VALUES ('. join(', ', @sqlq) .')';
+
+  # Insert into database
+	my $sth = $dbh->prepare($sql) or die "Could not prepare sql in db_insert: ".$dbh->errstr;		# Prepare SQL Statement
+	$sth->execute(@sqlv) or die "Could not execute sql in db_insert: ".$sth->errstr;		# Execute SQL Statement
+	my $insertid = $dbh->{'mysql_insertid'};
+	$sth->finish(  );
+	return $insertid;
+}
+
+# -------   Locate -------------------------------------------------------------
+
+# Find the ID number given input values
+# Used by new_user() among other things
+
+sub db_locate {
+
+	my ($self,$table,$vals) = @_;
+
+	my $dbh = $self->{dbh};
+	die "Database not ready in db_locate" unless ($dbh);
+						# Verify Input Data
+
+	die "db_locate(): Cannot locate with no values" unless ($vals);
+
+						# Prepare SQL Statement
+	my $stmt = "SELECT ".$table.
+		"_id from $table WHERE ";
+	my $wherestr = ""; my @whvals;
+	while (my($vx,$vy) = each %$vals) {
+		if ($wherestr) { $wherestr .= " AND "; }
+		$wherestr .= "$vx = ?";
+		push @whvals,$vy;
+	}
+	$stmt .= $wherestr . " LIMIT 1";
+
+	my $sth = $dbh->prepare($stmt);		# Execute SQL Statement
+
+	$sth->execute(@whvals) or return 0;
+
+		my $hash_ref = $sth->fetchrow_hashref;
+	$sth->finish(  );
+
+	return $hash_ref->{$table."_id"};
+
+}
+
+# -------   Prepare Input ----------------------------------------------------
+sub db_prepare_input {	# Filters input hash to contain only columns in given table
+
+  my ($self,$table,$input) = @_;
+
+	my $dbh = $self->{dbh};
+	die "Database not ready in db_prepare_input" unless ($dbh);
+	die "No table provided for db_prepare_input" unless ($table);
+	die "No input data provided for db_prepare_input" unless ($input);
+
+	#print "DB Prepare Input ($table $input)<br/>\n";
+	my $data = ();
+
+	# Get a list of columns
+	my @columns = $self->db_columns($table);
+
+	# Clean input for save
+	foreach my $ikeys (keys %$input) {
+
+    # Make sure the value is defined
+		next unless (defined $input->{$ikeys});
+
+    # Not allowed to set primary key
+		next if ($ikeys =~ /_id$/i);
+
+		# Skip if the table doesn't have that field defined
+		next unless (grep( /$ikeys/, @columns ));
+
+		# Set data
+		# print "$ikeys = $input->{$ikeys} <br>";
+		$data->{$ikeys} = $input->{$ikeys};
+	}
+
+	return $data;
+
+}
+
+
+sub db_table_exist {
+			my ($self,$table_name) = @_;
+
+      my $dbh = $self->{dbh};
+	    die "Database not ready in db_table_exist" unless ($dbh);
+
+			my @tables = $self->db_tables();
+			if (grep( /$table_name/, @tables )) { return 1; }
+			else { return 0; }
+
+	}
+
+
+#-------------------------------------------------------------------------------
+#
+# -------   Database Tables ---------------------------------------------------------
+#
+# 		Returns the list of tables in the database
+#	      Edited: 28 March 2010
+#-----------------------------------------------------------------------------
+sub db_tables {
+
+	my ($self) = @_; my @tables;
+
+	my $dbh = $self->{dbh};
+	die "Database not ready in db_tables" unless ($dbh);
+
+	my $sql = "show tables";
+	my $sth = $dbh->prepare($sql);
+	$sth->execute();
+	while (my $hash_ref = $sth->fetchrow_hashref) {
+		while (my($hx,$hy) = each %$hash_ref) { push @tables,$hy; }
+	}
+	return @tables;
+}
+1;
+
+
+
 
 	#----------------------------------------------------------------------------------------------------------
 	#
@@ -11696,7 +11897,7 @@ package gRSShopper::Feed;
 
 		$self->{feedstring} =~ s/^\s+//;			# Remove leading spaces
 		$self->{feedstring} = $response->content;
-		return "ERROR: Couldn't get $self->{feed_link} <br>" unless ($self->{feedstring});
+		return "ERROR: Couldn't get $self->{feed_link} <br>" unless ($self->{feedstring});   #'
 
 									# Save common cache
 		open FOUT,">$cache" or die "Error opening $cache: $!";
@@ -11740,6 +11941,14 @@ package gRSShopper::Feed;
 
   }
   1;
+
+
+
+
+
+
+
+
 
 	#----------------------------------------------------------------------------------------------------------
 	#
@@ -11815,32 +12024,731 @@ package gRSShopper::Person;
 
   1;
 
+
+
 	#----------------------------------------------------------------------------------------------------------
 	#
-	#                                             gRSShopper::Database;
+	#                                             gRSShopper::Record;
+	#
+	#      				table			   	(string) Record Table
+	#							id 						(int) Record ID
+	#             parent        (::Record) Parent record
+	#             person        (::Person) person creating the record
+	#							tags					Record type - associated with different types of record: feed, link, content, media, author, event
+	#   					db            (::Database) Pointer to database functions
+	#   					dbh          	(::DBI) Pointer to DBI database handler
+	#							data 					(hash reference) Data that accompanies the opening of the record
+	#						  load  				(boolean) if 1, load record data from database
+
+
+
+		#----------------------------------------------------------------------------------------------------------
+		#
+		#  Create using tag:  $item = gRSShopper::Record->new({tag=>'tagname'});
+		#  Tags are associated with different types of record: feed, link, content, media, author, event
+
+	package gRSShopper::Record;
+
+	  # $item = gRSShopper::Record->new("count",$itemcount);
+
+
+	  use strict;
+	  use warnings;
+	  our $VERSION = "1.00";
+
+
+	  sub new {
+	  	my($class, %args) = @_;
+	   	my $self = bless({}, $class);
+
+			# Import values from call
+	  	foreach ( keys %args ) { $self->{$_} = $args{$_};
+				#print $_;
+			}
+
+			# Set Record Type
+	    $self->{type} ||= $self->set_type($self->{tag});
+
+			# Import values from parent
+			if ($self->{parent}->{type}) {
+				&flow_values($self->{parent},$self->{parent}->{type},$self,$self->{type});	# Inherit values from the parent
+			}											# Actual values may override
+
+	    # Load record data from databases
+			if ($self->{id} eq "new") { $self->{id} = $self->create();}
+			&load($self) if ($self->{load});
+
+	 		return $self;
+	  }
+
+	  # Load record from database
+	  sub load {
+
+	    my $self = shift;
+			my $db = $self->{db};
+			my $dbh = $self->{dbh};
+			my $table = $self->{table};
+			my $record;
+
+
+			die "Tried to load record but no table was defined" unless ($table);
+
+			# Get record data
+			if ($self->{id} =~ /new|none/) { $record = &create($self); }
+			if ($self->{id}) { 	$record = $db->db_get_record($table,{$table."_id" => $self->{id}}); }
+			elsif ($self->{data}->{title}) { $record = $db->db_get_record($table,{$table."_title" => $self->{data}->{title}}); }
+
+
+			# Load it into current record_delete
+			while (my ($rx,$ry) = each %$record) { $self->{$rx} = $ry; }
+
+		}
+
+	  sub create {
+
+			my $self = shift;
+			my $db = $self->{db};
+			my $dbh = $self->{dbh};
+			my $table = $self->{table};
+			my $record;
+
+			# Record might be a database table where we know the title but not the id
+			# so we'll try to look up the ID and then load it
+	  	if ($self->{data} && ref($self->{data}) eq "string") {
+				  $self->{id} = &db_locate($dbh,"form",{$table."_title"=>$self->{data}});
+					if ($self->{id}) { &load(); return $self->{id}; }
+			}
+
+	    # If $data is a string, it's our new title
+			my $record_name = "";
+	  	if ($self->{data} && ref($self->{data}) eq "string") {	$record_name = $self->{data}; }
+
+			# Initialize time/date values
+			#my $tz = $tz || $Site->{st_timezone} || "America/Toronto";					# Allows input to specify timezone
+			#my $dt = DateTime->now( time_zone => $tz );													# Create DateTime
+			my $dt = DateTime->now();
+
+			my $table_record = {
+						$table."_creator"=>$self->{person}->{person_id},
+						$table."_crdate"=>$dt->epoch(),
+						$table."_name"=>$record_name,
+						$table."_title"=>$record_name,
+						$table."_pub_date"=> $dt->ymd('/'),
+			};
+
+	#
+
+			# Save the values and obtain new record id
+			my $id_number = $db->db_insert($table,$table_record);
+			return $id_number;
+
+		}
+
+	  sub set_type {
+			my $self = shift;
+			my ($tag) = @_;
+			return unless ($tag);
+			if ($tag =~ /(^feed$|^channel$)/i) { $self->{type} = "feed"; }
+			elsif ($tag =~ /(^item$|^entry$)/i) { $self->{type} = "link"; }
+			elsif ($tag =~ /(^content$|^description$)/i) { $self->{type} = "content"; }
+			elsif ($tag =~ /(^author$|^dc:creator$)/i) { $self->{type} = "author"; }
+			elsif ($tag =~ /(^media$|^media:content$)/i) { $self->{type} = "media"; }
+			elsif ($tag =~ /(^event$)/i) { $self->{type} = "event"; }
+
+	  }
+
+
+	  #----------------------------- Flow Values ------------------------------
+	  #
+	  #  Flow values from one type of record to another
+	  #  Eg., fill empty valies in a link with values from the feed
+	  #  Used to initialize record values
+
+
+	   sub flow_values {
+
+		my ($from,$from_prefix,$to,$to_prefix) = @_;
+
+		while (my ($fx,$fy) = each %$from) {
+			my $fprefix = $from_prefix."_";
+			my $tprefix = $to_prefix."_";
+			next unless ($fx =~ /$fprefix/i);					# Only flow through record values (signified by the presence of the prefix)
+			next if ($to_prefix =~ /feed_/);					# Never flow *to* feed
+			next if ($fx =~ /_id$/i);							# Never flow-through ID
+			next if ($fx =~ /_type$/i);							# Never flow-through type
+
+			if ($fx =~ /genre|section|author|publisher|title|descxription/) {		# Limited list of flow-through values
+				my $tx = $fx;												# These are intended to be defaults and
+				$tx =~ s/$fprefix/$tprefix/ig;									# re over-written by actual discovered values
+				$to->{$tx} ||= $from->{$fx};
+			}
+		}
+
+
+
+	   }
+
+
+
+
+	  sub load_from_db {
+
+	    my $self = shift;
+	    my ($dbh,$id) = @_;
+
+	    unless ($self->{type}) { $self->{error} = "Record type not defined on load from db"; return 0; }
+	    my $idfield = $self->{type}."_id";
+	    my $stmt = "SELECT * FROM $self->{type} WHERE $idfield=? LIMIT 1";
+	    my $sth = $dbh -> prepare($stmt);
+	    $sth -> execute($id);
+	    my $data = $sth -> fetchrow_hashref();
+	    $sth->finish(  );
+	    unless ($data) { $self->{error} = "$self->{type} '$id' not found in database."; return 0; }
+	    while (my($dx,$dy) = each %$data) { $self->{$dx} = $data->{$dx}; }
+	    return 1;
+	  }
+
+	  #
+	  #   Add a value to the end of a list of values in an element
+	  #   Delimeter defaults to ;
+
+
+	  # Adding values to elements
+
+	  sub set_value {
+
+		my ($self,$tag,$con) = @_;
+		$self->{$tag} = $con; 					# Just set a value, eg. title
+		$self->{$self->{type}."_".$tag} = $con;   		# Set a value for db storage, eg. feed_title
+	  }
+
+	  sub extend_list {
+
+		my ($self,$tag,$con,$delimiter) = @_;
+		$delimiter ||= ";";
+		if ($con) {
+			if ($self->{$tag}) { $self->{$tag} .= $delimiter; }  	# Just set a value, eg. title
+			$self->{$tag} .= $con;
+										# Set a value for db storage, eg. feed_title
+			if ($self->{$self->{type}."_".$tag}) { $self->{$self->{type}."_".$tag} .= $delimiter; }
+			$self->{$self->{type}."_".$tag} .= $con;
+
+		}
+	  }
+
+	    sub do_not_replace {
+
+		my ($self,$tag,$con) = @_;
+		unless ($self->{$tag}) { $self->{$tag} = $con; 	}	# Just set a value, eg. title
+		unless ($self->{$self->{type}."_".$tag}) {
+			$self->{$self->{type}."_".$tag} = $con;   }		# Set a value for db storage, eg. feed_title
+	  }
+
+	  sub target {
+		my $self = shift;
+		if( @_ ) {
+			my $target = shift;
+	      	$self->{target} = $target;
+		}
+		return $self->{target};
+	  }
+
+
+	  sub to_string {
+	   	my $self = shift;
+	   	return $self->{page_content};
+	  }
+
+	  sub print {
+	  	my $self = shift;
+	   	print $self->to_string(), "\n";
+	  }
+		# -------  Conditional print -------------------------------------------------------
+	sub diag {
+
+		# $diag_level set at top
+
+		my ($self,$score,$output) = @_;
+	  return unless($self->{diag_level});
+		if ($score <= $self->{diag_level}) {
+			print $output;
+		}
+
+		return;
+	}
+	 1;
+
+
+
+
+		#----------------------------------------------------------------------------------------------------------
+		#
+		#                                             gRSShopper::Window;
+    #
+		#   table            		(string) Table being displayed in the window
+		#   id 			  		  		(int) ID of record being displayed in the woindow
+		#   starting_tab 				(string) Tab to display when window is opened
+		#   reader_hidden    		(boolean) Controls whether we're displaying the reader tab or not
+		#		person_name					(::Person)  person opening the window
+		#   db                  (::Database) Pointer to database functions
+		#   dbh               	(::DBI) Pointer to DBI database handler
+		#   data								(hash reference)  Data that accompanies the opening of the window
+		#
+		#   record              (::Record) Record being displayed
+		#   field_list          (array) List of fields in the table being displayed		(generated)
+		#   tab_list            (hash reference) Tabs being displayed (generated)
+		#   show_active 				(string) Toggle to show active (inserts some css) (generated)
+		#
+		#----------------------------------------------------------------------------------------------------------
+	package gRSShopper::Window;
+
+	  #  Window to display various tabs (aka Scaffolds) associated with a data record
+
+
+	  use strict;
+	  use warnings;
+
+	  our $VERSION = "1.00";
+
+	  sub new {
+
+	  	my($class, $args) = @_;
+	   	my $self = bless({}, $class);
+
+			# Import Arguments
+	   	while (my($ax,$ay) = each %$args) {
+	   		#print "$ax = $ay <br>";
+	   		$self->{$ax} = $ay;
+      }
+
+      # get a record to display
+			if  ($self->{table}) {
+				# Import Record Data
+		  	$self->{record} = gRSShopper::Record->new(
+					table => $self->{table},
+					id => $self->{id},
+					data => $self->{data},
+					db => $self->{db},
+					dbh => $self->{dbh},
+					person => $self->{person},
+					load => 1,
+				);
+	  	}
+
+
+      $self->get_tab_list($self->{table},$self->{dbh});
+
+
+      return $self;
+
+
+
+	  }
+
+		sub get_tab_list {
+
+		  my ($self,$table,$dbh) = @_;
+			my $db = $self->{db};
+			# If the Form table exists
+
+		  my @fieldlist;
+			my $tablist;
+			my $active;
+			my $defined = 0;		# Flag set if this table has a form defined, 0 if this form is set using default values
+
+
+			if ($db->db_table_exist("form")) {
+
+				# Find the record for the current $table
+				my $tableid = $db->db_locate("form",{form_title=>$table});
+
+				if  ($tableid) {
+
+					# Get the 'data' from the record, and split it into fields
+					my $table_data = $db->db_get_single_value("form","form_data",$tableid);
+					$table_data =~ s/\n//g;
+					@fieldlist = split /;/,$table_data;
+					if ($table_data) { $self->{form_defined} = 1; }
+
+				} else {
+							@fieldlist = &auto_generate_fieldlist($self,$table);
+				}
+			} else {
+				@fieldlist = &auto_generate_fieldlist($self,$table);
+			}
+
+			unless (@fieldlist) { @fieldlist = &auto_generate_fieldlist($self,$table); }
+
+		  my $currenttab = "Edit"; my $temp;
+			foreach my $field (@fieldlist) {
+
+		      if ($field =~ /tab:/i) {
+						($temp,$currenttab) = split /:/,$field;
+						$currenttab =~ s/^\s|\s$//g;  # Remove leading or trailing space
+						if ($field =~ /,active/i) { $active = $currenttab; }
+						push @{$tablist->{$currenttab}},"Placeholder to make sure tab is found";
+					}	else {
+						push @{$tablist->{$currenttab}},$field;
+					}
+			}
+			$self->{tab_list} = $tablist;
+			$self->{show_active} = $active;
+      $self->{field_list} = @fieldlist;
+
+			return ($tablist,$active,$defined,@fieldlist);
+
+		}
+
+		sub auto_generate_fieldlist {
+
+			my ($self,$table) = @_;
+
+			my $db = $self->{db};
+			my $dbh = $self->{dbh};
+
+			# Get the list of columns from the database
+			my @columns = ();
+			my @fieldlist = ();
+
+			my $showstmt = "SHOW COLUMNS FROM $table";
+			my $sth = $dbh -> prepare($showstmt);
+			$sth -> execute();
+
+			# Get optlist values just once, ahead of time
+			my $optlist_array = $db->db_get_column("optlist","optlist_title");
+
+
+			# For each column...
+			while (my $showref = $sth -> fetchrow_hashref()) {
+
+				# Normalize the column name
+				my $fullfieldname = $showref->{Field};
+				my $prefix = $table."_"; $showref->{Field} =~ s/$prefix//;
+
+				# Extract column type and length values
+				my ($fieldtype,$fieldsize) = split /\(|\)/,$showref->{Type};
+				if ($fieldsize+0 == 0) { $fieldsize = 10; }  # Prevent 0 fieldsize
+
+				# Some defaults fieldtypes for important fields
+
+
+				if ($table eq "form" && $showref->{Field} eq "data") { $fieldtype = "data"; }
+				elsif ($table eq "presentation" && ($showref->{Field} eq "post")) { $fieldtype = "keylist"; } # Temporary
+				elsif ($table eq "optlist" && $showref->{Field} eq "data") { $fieldtype = "text"; }
+				elsif ($table eq "view" && $showref->{Field} eq "text") { $fieldtype = "text"; }
+				elsif ($table eq "box" && $showref->{Field} eq "content") { $fieldtype = "text"; }
+				elsif ($table eq "box" && $showref->{Field} eq "description") {  $fieldtype = "textarea_input"; }
+				elsif ($showref->{Field} eq "description") { $fieldtype = "text"; }
+				elsif ($showref->{Field} eq "data") { $fieldtype = "data"; }
+				elsif ($fullfieldname =~ /_file/) { $fieldtype = "file"; }
+				elsif ($fullfieldname =~ /_password/) { $fieldtype = "password"; }
+				elsif ($fullfieldname =~ /_date/) { $fieldtype = "date"; }
+				elsif ($fullfieldname =~ /_social_media/) { $fieldtype = "publish"; }
+				elsif ($fullfieldname =~ /_start/ || $fullfieldname =~ /_finish/) { $fieldtype = "datetime"; }
+				elsif (grep { /$fullfieldname/ } @$optlist_array) { $fieldtype = "optlist"; }
+				elsif ($table eq "post" && ($showref->{Field} eq "author" || $showref->{Field} eq "feed")) { $fieldtype = "keylist"; } # Temporary
+				elsif ($table eq "publication" && ($showref->{Field} eq "post")) { $fieldtype = "keylist"; } # Temporary
+				else { $fieldtype = "varchar"; }
+
+				# Push the column information into the new @fieldlist array
+				# (which will now look just like the comma-delimited data if it were retrieved from the Form table
+				push @fieldlist,"$showref->{Field},$fieldtype,$fieldsize,$showref->{Default}";
+			}
+
+
+
+			return @fieldlist;
+
+		}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1;
+	#----------------------------------------------------------------------------------------------------------
+	#
+	#                                             gRSShopper::Blockchain;
+	#
+	#   Just playinng
+	#   Based on Daniel Flymen, Learn Blockchains by Building One
+	#   https://hackernoon.com/learn-blockchains-by-building-one-117428612f46
 	#
 	#----------------------------------------------------------------------------------------------------------
-package gRSShopper::Database;
+package gRSShopper::Blockchain;
 
   #  $Person = gRSShopper::Person->new({person_title=>'title',person_password=>'password'});
   # Note that password will be encrypted in save
 
+	use JSON qw(encode_json decode_json);
+	use Digest::SHA qw(hmac_sha256_base64);
+	use LWP::Simple;
+	use Fcntl qw(:flock SEEK_END);
 
   use strict;
   use warnings;
   our $VERSION = "1.00";
 
-
-
   sub new {
   	my($class, $args) = @_;
-   	my $self = bless({}, $class);
-   	while (my($ax,$ay) = each %$args) {
-   		print "$ax = $ay <br>";
-   		$self->{$ax} = $ay; }
+		my $self = bless({}, $class);
+		$self->{current_transactions} = [];
+		$self->{nodes} = [];
+		$self->{chain} = [];
+
+		# Retrieve stored version of the boockchain from file
+
+		my ($chain,$current,$nodes) = $self->open();
+		if ($chain) {	$self->{chain} = $chain; }
+		if ($current) {	$self->{current_transactions} = $current }
+		if ($nodes) {	$self->{nodes} = $nodes; }
+
+		unless ( $self->{chain}) {
+				$self->new_block(1,100);		# Initializes; previous_hash=1, proof=100
+		}
+
+    return $self;
+  }
 
 
+	# Create a new Block in the Blockchain
+	# :param proof: <int> The proof given by the Proof of Work algorithm
+	# :param previous_hash: (Optional) <str> Hash of previous Block
+	# :return: (object) New Block
+
+	sub new_block {
+
+    my ($self,$proof,$previous_hash) = @_;
+	  $previous_hash ||= "None";
+
+		my @chain = $self->{chain};
+		my $index = $#chain;
+		my @transactions = $self->{current_transactions};
+
+	#	my $self_hash = $self->hash($self->{chain}[$#chain+1]);
+
+
+		my $block = {
+				index => $index,
+				timestamp => time,
+				transactions =>  @transactions,
+				proof => $proof,
+				previous_hash => $previous_hash,
+		};
+
+    push @{$self->{chain}},$block;
+		return $block;
+
+	}
+
+	# Creates a new transaction to go into the next mined Block
+	# :param sender: <str> Address of the Sender
+	# :param recipient: <str> Address of the Recipient
+	# :param amount: <int> Amount
+	# :return: <int> The index of the Block that will hold this transaction
+
+	sub new_transaction {
+
+     my ($self,$sender,$recipient,$amount) = @_;
+
+		 push @{$self->{current_transactions}},
+		 	{
+				sender => $sender,
+				recipient => $recipient,
+				amount => $amount
+			};
+
+		  return $#{$self->{current_transactions}} +1;
+	}
+
+	# Creates a SHA-256 hash of a Block
+	# :param block: <dict> Block
+	# :return: <str>
+
+	sub hash {
+
+   my ($self,$block) = @_;
+
+
+   # Canonical because we must make sure that it is ordered, or we'll have inconsistent hashes
+	 my $json_text = JSON::XS->new->canonical()->encode($block);
+	 my $digest = hmac_sha256_base64($json_text, "secret");
+	 # Fix padding of Base64 digests
+   while (length($digest) % 4) { $digest .= '='; }
+	 return $digest;
+
+	}
+
+	sub last_block {
+
+		 my ($self) = @_;
+		 my @chain = $self->{chain};
+		 return $self->{chain}[$#chain];
+
+	}
+
+		#Simple Proof of Work Algorithm:
+		# - Find a number p' such that hash(pp') contains leading 4 zeroes, where p is the previous p'
+		# - p is the previous proof, and p' is the new proof
+		#:param last_proof: <int>
+		#:return: <int>
+
+	sub proof_of_work {
+
+   my ($self,$last_proof) = @_;
+
+	 	my $proof = 0;
+		while ($self->valid_proof($last_proof, $proof) == 0) {
+			$proof++;
+    }
+
+    return $proof;
+	}
+
+	# Validates the Proof: Does hash(last_proof, proof) contain 4 leading zeroes?
+	# :param last_proof: <int> Previous Proof
+	# :param proof: <int> Current Proof
+	# :return: <bool> True if correct, False if not.
+
+  sub valid_proof {
+
+   my ($self,$last_proof,$proof) = @_;
+
+	 	my $guess = $last_proof.$proof;
+		my $digest = hmac_sha256_base64($guess, "secret");
+		my $test = substr $digest, 0, 4;
+		if ($test eq "0000") { return 1;} else { return 0;}
+
+	}
+
+
+  #	Determine if a given blockchain is valid
+	# :param chain: <list> A blockchain
+	# :return: <bool> True if valid, False if not
+
+  sub valid_chain {
+
+    my ($self,@chain) = @_;
+
+		my $last_block = $chain[0];
+    my $current_index = 0;
+		my $length = $#chain +1;
+
+
+		while ($current_index < $length) {
+			my $block = $chain[$current_index];
+			print($last_block);
+			print($block);
+			return 0 unless ($block->{previous_hash} eq $self->hash($last_block));
+			return 0 unless ($self->valid_proof($last_block->{proof},$block->{proof}));
+			$last_block = $block;
+			$current_index++;
+		}
+		return 1;
+	}
+
+	# This is our Consensus Algorithm, it resolves conflicts
+	# by replacing our chain with the longest one in the network.
+	# :return: <bool> True if our chain was replaced, False if not
+
+  sub resolve_conflicts {
+
+    my ($self) = @_;
+
+		my @neighbours = $self->{nodes};
+		my @new_chain;
+		my @chain = $self->{chain};
+
+		# We're only looking for chains longer than ours
+		my $max_length = $#chain+1;
+		foreach my $node (@neighbours) {
+			my $url = $node . "?cmd=chain";
+			my $response = get($url);
+			if ($response) {
+				my $data = decode_json($response);
+				my @chain = $data->{chain};
+				my $length = scalar @chain;
+
+				# Check if the length is longer and the chain is valid
+			  if ($length > $max_length && $self->valid_chain(@chain)) {
+				  $max_length = $length;
+					@new_chain = @chain;
+				}
+			}
+		}
+
+		if (@new_chain) {
+			$self->{chain} = @new_chain;
+			return 1;
+		}
+
+		return 0;
+
+	}
+
+
+
+	# Add a new node to the list of nodes
+  # :param address: <str> Address of node. Eg. 'http://192.168.0.5:5000'
+  # :return: None
+
+   sub register {
+
+      my ($self,$url) = @_;
+			unless (grep($url, @{$self->{nodes}})) {   # Ensure uniqueness of members in array
+				push @{$self->{nodes}},$url;
+		  }
+
+	 }
+
+	 # Open the currently persisting copy of the blockchain from a file
+
+	sub open {
+
+	  my ($self) = @_;
+
+	  my $blockchain_file = "data/blockchain.json";
+	  open(my $fh, "$blockchain_file") || die "Could not open $blockchain_file for read";
+		flock($fh, LOCK_EX) or die "Cannot lock $blockchain_file - $!\n";
+		my $blockchain_data = <$fh>;
+	  close $fh;
+		my $new_blockchain;
+		if ($blockchain_data && $blockchain_data ne "null") { $new_blockchain = decode_json($blockchain_data); }
+		return unless (ref $new_blockchain eq "HASH" &&  $new_blockchain->{chain});
+		my $chain = $new_blockchain->{chain};
+		my $current = $new_blockchain->{current_transactions};
+		my $nodes = $new_blockchain->{nodes};
+		return ($chain,$current,$nodes);
 
   }
 
-  1;
+
+
+
+
+1;

@@ -7,8 +7,6 @@ var url = 'api.cgi';
 function startUp(url) {
 
 
-
-
   $( document ).ready(function() {
 
     // Load Reader tab
@@ -221,15 +219,13 @@ function openDiv(url,div,app,db,id,title,starting_tab) {
 //
 
 
-function openMain(url,app,db,id,title,starting_tab) {
-//alert(app+","+db+","+id+","+title+","+starting_tab);
+function openMain(url,cmd,db,id,title,starting_tab) {
+
     // Assign a URL to main add an "active" class to the button that opened the tab
     var baseurl = url;
-    if (title) { url = url + "?cmd="+app+"&app="+app+"&starting_tab="+starting_tab+"&db="+db+"&id="+id+"&title="+title; }
-    else if (id) { url = url + "?cmd="+app+"&app="+app+"&starting_tab="+starting_tab+"&db="+db+"&id="+id; }
-    else { url = url + "?cmd="+app+"&app="+app+"&starting_tab="+starting_tab+"&db="+db; }
-// alert(url);
-//alert(starting_tab);
+    if (title) { url = url + "?cmd="+cmd+"&starting_tab="+starting_tab+"&db="+db+"&id="+id+"&title="+title; }
+    else if (id) { url = url + "?cmd="+cmd+"&starting_tab="+starting_tab+"&db="+db+"&id="+id; }
+    else { url = url + "?cmd="+cmd+"&starting_tab="+starting_tab+"&db="+db; }
 
     $('#main').load(url, function(response, status, xhr) {
         if (status == "error") {
