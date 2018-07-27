@@ -117,3 +117,6 @@ Some help with the form (*** means 'pick whatever you want'):
 -- where *********** is your directory
 and ^^^^^^^^^^ is the site key entered in the form above
 
+- To open the PLE, navigate to https://yourservername/cgi-bin/page.cgi?page=PLE&force=yes
+
+(once you publish this page you can just go to https://yourservername/ple.htm  )
