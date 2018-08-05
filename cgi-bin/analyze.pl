@@ -803,7 +803,7 @@ sub previous_next_analysis {
 	use JSON::XS;
 	my $json_text = get("https://autocomplete.clearbit.com/v1/companies/suggest?query=$search") || print "Could not access Clearbit: $! <p>";
 
-	# Extract search results from JSON - #sk_106d8475acaa57a53f51faa04dbceb41
+	# Extract search results from JSON -
 	my $perl_scalar = decode_json $json_text;
 	#while (my ($x,$y) = each %$perl_scalar) { print "$x = $y <br>"; }
 	foreach my $ps (@$perl_scalar) {
