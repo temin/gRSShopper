@@ -1,5 +1,6 @@
 #    gRSShopper 0.7  Common Functions  0.83  --
 
+require "analyze.pl";
 
 #-------------------------------------------------------------------------------
 
@@ -4269,6 +4270,8 @@ sub Tab_Upload {
 
 }
 
+
+
 	# TABS ----------------------------------------------------------
 	# ------- Preview --------------------------------------------
 	#
@@ -8250,10 +8253,10 @@ sub graph_add {
 	my ($tabone,$idone,$tabtwo,$idtwo,$type,$typeval) = @_;
 
 	# Return if it already exists
-	if (&db_locate($dbh,"graph",{
+	if ($eid = &db_locate($dbh,"graph",{
 		graph_tableone=>$tabone, graph_idone=>$idone,
 		graph_tabletwo=>$tabtwo, graph_idtwo=>$idtwo} ))
-		{ return "Exists"; }
+		{ return "Exists - $eid"; }
 
   # Otherwise, Create Entry
 	my $graphid = &db_insert($dbh,$query,"graph",{
@@ -8375,7 +8378,7 @@ sub find_graph_of {
 
 		} else {							# by table
 
-
+    #print "Finding graph $tableone,$idone for $tabletwo (in cache) ",@{$Site->{$tableone}->{$idone}->{$tabletwo}},"<br>";
 			return @{$Site->{$tableone}->{$idone}->{$tabletwo}};
 		}
 
@@ -8383,7 +8386,7 @@ sub find_graph_of {
 
 	} else {							# Create a cache and call the function again
 									# so we have one DB call per record, not 12, or 16 times
-
+   #print "Finding graph $tableone,$idone for $tabletwo <br>";
 		my $sql = qq|SELECT * FROM graph WHERE (graph_tableone = ? AND graph_idone = ?) OR (graph_tabletwo = ? AND graph_idtwo = ?)|;
 		my $sth = $dbh->prepare($sql);
 		$sth -> execute($tableone,$idone,$tableone,$idone); my $grfound=0;
