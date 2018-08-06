@@ -475,6 +475,17 @@ print " OK$newline";
 
 
 
+  # Check for Mastodon::Client
+    print "Checking for Mastodon::Client. This communicates with a Mastodon server for messaging";
+    eval "use Mastodon::Client";
+    if ($@) {
+      print "$newline"."The Mastodon::Client module could not be located. Mastodon will not function properly.$newline";
+      $missing=1;
+    } else {
+  	print " OK$newline";
+    }
+
+
 
 # -------------
 # Provide CPAN help
