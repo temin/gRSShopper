@@ -1,6 +1,8 @@
 #    gRSShopper 0.7  Common Functions  0.83  --
 
-require "analyze.pl";
+my $dirname = dirname(__FILE__);
+require $dirname . "/analyze.pl";
+
 
 #-------------------------------------------------------------------------------
 
@@ -46,10 +48,12 @@ sub load_modules {
 	use LWP::Simple;
 
 
+
 	# Added by Luc - Support for french (or other) dates
 	# Required by : locale_date
 	use POSIX qw(locale_h);
 	use POSIX qw(strftime);
+  use POSIX qw(tzset);   # for time zones
 	use Scalar::Util 'looks_like_number';
 	use Date::Parse;
 
@@ -201,6 +205,9 @@ sub get_config {
 	}
 	$sth->finish();
 
+  # Set the time zones
+  if ($Site->{st_timezone}) { $ENV{TZ} = $Site->{st_timezone}; }
+
 }
 	# -------   Get Person ---------------------------------------------------------
 	#
@@ -214,10 +221,10 @@ sub get_person {
 								# and exit
 
 										# Confirm cron key
-		my $cronkey = $ARGV[1];
+		my $cronkey = $ARGV[1] || $vars->{cronkey};
 		unless ($Site->{cronkey} eq $cronkey) {
 
-			print &printlang('Cron key mismatch',$vars->{cronkey},$Site->{st_name});
+			print &printlang("Cron key ".$Site->{cronkey}." mismatch",$vars->{cronkey},$Site->{st_name});
 			&send_email("stephen\@downes.ca","stephen\@downes.ca",
 				&printlang("Cron Error",$Site->{st_name}),
 				"Cron key mismatch between $Site->{cronkey} and  $cronkey in get_person() - Args: $ARGV[0] - $ARGV[1] - $ARGV[2] - $ARGV[3]");
@@ -4242,7 +4249,7 @@ return  $output;
 sub Tab_Reader {
 
   my ($window,$table,$id_number,$record,$data,$defined) = @_;
-  my $output = "";
+  my $output = "Reader";
   foreach my $field (@{$window->{tab_list}->{Reader}}) {
 	  $output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
   }
@@ -6376,7 +6383,7 @@ sub form_publish {
   my $url = $Site->{st_cgi}."api.cgi";
 
 	# List of supported social media sites
-	my @accounts = qw(Web Twitter Facebook RSS JSON);
+	my @accounts = qw(Web Twitter Mastodon Facebook RSS JSON);
 										# Future work - get this from the list of accounts
 	# Set up return content
 	my $return_text = qq|
@@ -7724,9 +7731,10 @@ sub db_update {
         }
 
 	$sql .= join ', ', @sqlf;
-	$sql .= " WHERE ".$table."_id = '".$where."'";
-  #print "$sql <br>";
-  #foreach $l (@sqlv) { print "$l ; "; }
+  $sql .= " WHERE ".$table."_id = '".$where."'";
+
+#  print "$sql <br>";
+#  foreach $l (@sqlv) { print "$l ; "; }
 	my $sth = $dbh->prepare($sql);
 
 	if ($diag eq "on") { print "$sql <br/>\n @sqlv <br/>\n"; }
@@ -10618,6 +10626,8 @@ sub record_notifications {
 }
 
 #               THIRD PARTY INTEGRATION
+#
+#    Longer term I'd like to standardize these functions
 
 
 
@@ -10782,6 +10792,121 @@ sub facebook_access_code_submit {
 	exit;
 }
 
+# -------   Mastodon --------------------------------------------------
+#
+# Autopost to Mastodon
+# Requires: $dbh,$table,$id
+# Optional: $toot (will print record title if tweet is not given)
+# Requires $Site->{mas_post} set to 'yes' and $record->{post_social_media} to not contain "mastodon" (for the post specified)
+# Will include site hastag $Site->{st_tag} if $Site->{mas_use_tag} is set to "yes"
+# Will update the record to set the value 'posted' the value in 'post_twitter'   (or 'event_twitter', etc)
+# to ensure each item is posted only once
+# Returns status update in $vars->{twitter}
+
+
+sub mastodon_post {
+
+    my ($dbh,$table,$id,$tweet) = @_;
+
+    # Check and make sure it can be and hasn't been posted
+
+    return "Content information not defined" unless ($table && $id);
+    return "Mastodon turned off."  unless ($Site->{mas_post} eq "yes");
+    return "Already posted this $table to Mastodon." if ($record->{$table."_social_media"} =~ "mastodon");
+    return "Mastodon requires a client ID, client secret and access token" unless
+       ($Site->{mas_instance} && $Site->{mas_cli_id} && $Site->{mas_cli_secret} && $Site->{mas_acc_token});
+
+
+    $tweet = &compose_microcontent($dbh,$table,$id,$tweet,500);
+
+    use Mastodon::Client;
+
+    my $client = Mastodon::Client->new(
+      instance        => $Site->{mas_instance},
+      name            => 'gRSShopper',
+      client_id       => $Site->{mas_cli_id},
+      client_secret   => $Site->{mas_cli_secret},
+      access_token    => $Site->{mas_acc_token},
+      coerce_entities => 1,
+    );
+
+    my $result = $client->post_status($tweet);
+    if ($result) { return $result; } else { return "OK"; }
+
+
+}
+
+sub mastodon_harvest {
+
+	my ($channel) = @_;
+
+	  # Turn on Mastodon Listener
+	  # Streaming interface might change!
+	#  use Mastodon::Client or print "Whga??";
+
+  return unless ($channel->{channel_tag});      # Harvest ONLY if there is a tag
+  my $tag = "#".$channel->{channel_tag}; $tag =~ s/##/#/;
+
+	use Mastodon::Client;
+
+	my $client = Mastodon::Client->new(
+	  instance        => $Site->{mas_instance},
+	  name            => 'gRSShopper',
+	  client_id       => $Site->{mas_cli_id},
+	  client_secret   => $Site->{mas_cli_secret},
+	  access_token    => $Site->{mas_acc_token},
+	  coerce_entities => 1,
+	);
+
+#my $timeline = $client->timeline($tag) or return "Mastodon harvest error.";
+
+#return "tt<p>";
+
+  my $timeline = $client->timeline("public");
+#return "Mastodon $tag $timeline <p>";
+  foreach my $t (@$timeline) {
+#return "Found one: $t <br>";
+  #  print $t,"<br>";
+
+				my $content = get($t->{uri});
+				#print qq|<div style="width:100px;">$content</div>|;
+
+        $content =~ /<meta content="(.*?)" property="og:description/;
+        my $description = $1;
+				next unless ($description =~ /$tag/);
+				$content =~ /<meta content="(.*?)" property="og:title/;
+        my $mastotitle = $1;
+
+				my $chat; my $userstr = "";
+
+				my ($created,$garbage) = split / \+/,$status->{created_at};
+				$description =~ s/\x{201c}/ /g;	# "
+				$description =~ s/\x{201d}/ /g;	# "
+				$chat->{chat_link} = $t->{uri};
+				$chat->{chat_title} = "Chat title";
+
+        $chat->{chat_description} = qq|
+					<img src="" align="left" hspace="10">
+					<a href="$chat->{chat_link}">\@|.$mastotitle.qq|</a>: |.
+					$description . "";
+				$chat->{chat_signature} = "Mastodon";
+				$chat->{chat_crdate} = time;
+				$chat->{chat_channel} = $channel->{channel_id};
+				$chat->{chat_creator} = $Person->{person_id};
+				$chat->{chat_crip} = $ENV{'REMOTE_ADDR'};
+
+				if (my $cid = &db_locate($dbh,"chat",{chat_link => $chat->{chat_link}})) {
+					# Nothing
+				} else {
+					my $id_number = &db_insert($dbh,$query,"chat",$chat);
+				}
+
+   }
+
+
+
+}
+
 # -------   Twitter --------------------------------------------------
 #
 # Autopost to Twitter
@@ -10796,7 +10921,7 @@ sub facebook_access_code_submit {
 sub twitter_post {
 
 	my ($dbh,$table,$id,$tweet) = @_;
-	my $record = &db_get_record($dbh,$table,{$table."_id"=>$id});
+
 
 	unless ($Site->{tw_post} eq "yes") { $vars->{twitter} .= "Twitter turned off."; return $vars->{twitter}; }
 
@@ -10819,46 +10944,7 @@ sub twitter_post {
 		unless ($Site->{tw_cckey} && $Site->{tw_csecret} && $Site->{tw_token} && $Site->{tw_tsecret});
 
 
-										# Create Array of Post Sentences
-	my $post_description = $record->{$table."_description"};
-	$post_description =~ s/<(.*?)>//g;
-	my @sentences = split /\. /,$post_description;
-
-
-										# Compose Title and URL
-	my $tw_url = $Site->{st_url}.$table."/".$id;
-	if ($Site->{tw_use_tag}) { $tw_url = $Site->{st_tag}." ".$tw_url; }
-	my $url_length = length($tw_url)+1;
-	$tweet ||= $record->{$table."_title"};
-	$tweet =~ s/&#39;/'/g;
-	my $tweet_length = length($tweet);
-
-										# Create Initial Tweet (Abbreviating title if necessaey)
-	if (($url_length + $tweet_length) > 277) {
-		my $etc = "...";
-		my $trunc_length = 277 - $url_length;
-		$tweet = substr($tweet,0,$trunc_length);
-		$tweet =~ s/(\w+)[.!?]?\s*$//;
-		$tweet.=$etc;
-	}
-
-	$tweet = $tweet . " " . $tw_url;
-
-	foreach my $sentence (@sentences) {					# Add sentences to tweet if they fit
-		$sentence =~ s/&#39;/'/;
-		$sentence =~ s/&#38;/'/;
-		$sentence =~ s/&quot;/"/;
-		last if (length($tweet)+length($sentence)+2 > 280);
-
-		$tweet = $tweet ." ". $sentence .".";
-	}
-
-
-
-	$tweet =~ s/\xe2\x80\x99/\'/gs;						# Convert smartquotes
-	$tweet =~ s/\xe2\x80\x98/\'/gs;						# No doubt more UTF8 stuff needs to be fixed
-	$tweet =~ s/\xe2\x80\x9c/\"/gs;
-	$tweet =~ s/\xe2\x80\x9d/\"/gs;
+	$tweet = &compose_microcontent($dbh,$table,$id,$tweet,280);
 
 	my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 		consumer_key        => $Site->{tw_cckey},
@@ -10883,6 +10969,79 @@ sub twitter_post {
 	return $vars->{twitter};
 
 }
+
+sub compose_microcontent {
+
+   my ($dbh,$table,$id,$tweet,$length) = @_;
+
+  $tweet  =~ s/<(.*?)>//g;
+	my $record = &db_get_record($dbh,$table,{$table."_id"=>$id});
+
+
+										# Create Array of Post Sentences
+	my $post_description; my @sentences;
+  if ($table eq "post") {
+		$post_description = $record->{$table."_description"};
+		$post_description =~ s/<(.*?)>//g;
+		@sentences = split /\. /,$post_description;
+  }
+
+
+										# Compose Title and URL
+  my $tw_url;
+  if ($table eq "chat") {      # Special URL for chat
+     $tw_url = "";
+	} else {
+     $tw_url = $Site->{st_url}.$table."/".$id;
+  }
+
+  # Tag
+  unless ($vars->{chat_tag}  =~ /#/) { $vars->{chat_tag} = "#".$vars->{chat_tag};}
+  if ($table eq "chat") { $tw_url = $vars->{chat_tag}." ".$tw_url; }
+	elsif ($Site->{tw_use_tag}) { $tw_url = $Site->{st_tag}." ".$tw_url; }
+
+
+	my $url_length = length($tw_url)+1;
+	if ($table eq "post") { $tweet ||= $record->{$table."_title"}; }     # Place title for post
+	$tweet =~ s/&#39;/'/g;
+	$tweet =~ s/&#38;/'/g;
+	$tweet =~ s/&quot;/"/g;
+	my $tweet_length = length($tweet);
+
+										# Create Initial Tweet (Abbreviating title if necessaey)
+	if (($url_length + $tweet_length) > ($length-3)) {
+		my $etc = "...";
+		my $trunc_length = 277 - $url_length;
+		$tweet = substr($tweet,0,$trunc_length);
+		$tweet =~ s/(\w+)[.!?]?\s*$//;
+		$tweet.=$etc;
+	}
+
+	$tweet = $tweet . " " . $tw_url;
+
+	foreach my $sentence (@sentences) {					# Add sentences to tweet if they fit
+		$sentence =~ s/&#39;/'/g;
+		$sentence =~ s/&#38;/'/g;
+		$sentence =~ s/&quot;/"/g;
+		last if (length($tweet)+length($sentence)+2 > $length);
+
+		$tweet = $tweet ." ". $sentence .".";
+	}
+
+
+
+	$tweet =~ s/\xe2\x80\x99/\'/gs;						# Convert smartquotes
+	$tweet =~ s/\xe2\x80\x98/\'/gs;						# No doubt more UTF8 stuff needs to be fixed
+	$tweet =~ s/\xe2\x80\x9c/\"/gs;
+	$tweet =~ s/\xe2\x80\x9d/\"/gs;
+
+
+
+
+   return $tweet;
+
+}
+
 
 # -------   Big Blue Button ---------------------------------------------------------
 
@@ -10931,7 +11090,11 @@ sub bbb_joinmod {
 }
 sub bbb_create_meeting {
 
-	my ($name,$id) = @_;
+	my ($name,$id
+
+
+
+	) = @_;
   #print "Content-type: text/html\n\n";
   #print "Smod password $Site->{bbb_mp} <p>";
 	$name =~ s/ /+/g; $id =~ s/ /+/g;
@@ -11212,6 +11375,7 @@ package gRSShopper::Site;
 
  	# Load language translation packages
  	$self->__load_languages();
+
 
 
  	return $self;

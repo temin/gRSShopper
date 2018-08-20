@@ -58,6 +58,8 @@
 
 # while (my($vx,$vy) = each %$vars) { print "$vx = $vy <br>"; }
 
+
+
 # -------------------------------------------------------------------------------------
 #          Public App Functions
 #
@@ -117,6 +119,16 @@
 			#{} print qq|</textarea>|;
 			 exit;
   }
+
+  # READER
+	elsif ($vars->{cmd} eq "show" && $vars->{title} eq "Reader") {
+
+		print "Content-type: text/html\n\n";
+			print "SHOW";
+			while (my($vx,$vy) = each %$vars) { print "$vx = $vy <br>"; }
+		print &api_show_record(); exit;
+	}
+
 
 
 	# SHOW
@@ -530,7 +542,7 @@ if ($vars->{cmd}) {
 	 exit;
 }
 
-
+# "
 # API Show ----------------------------------------------------------
 # ------- Show Record ------------------------------------------------------
 #
@@ -545,6 +557,7 @@ sub api_show_record {
 	 return unless (&is_allowed("view",$vars->{table}));
 	 &admin_only() if ($vars->{table} eq "box" && $vars->{id} eq "Start");	# Sets PLE start screen to login if needed
 	 print "Content-type: text/html\n\n";
+
    unless ($vars->{id}) { return "Don't know which ".$vars->{table}." number to show."; exit;}
 	 $vars->{format} ||= "html";
 	 return	&output_record($dbh,$query,$vars->{table},$vars->{id},$vars->{format},"api");
@@ -1277,6 +1290,17 @@ sub api_publish {
 
 		}
 
+		elsif ($vars->{value} =~ /mastodon/i) {
+
+			print "Sending to Mastodon<br>";
+			my $mastodon = &mastodon_post($dbh,"post",$id);
+			print "Mastodon result: $mastodon<br>";
+			$published .= ",mastodon";
+			my $result = &db_update($dbh,$table, {$col => $published}, $id); # Prevent publishing twice
+			print "Recorded publication success $result<br>";
+			exit;
+
+		}
 
 		elsif ($vars->{value} =~ /web|json|rss/i) {
 

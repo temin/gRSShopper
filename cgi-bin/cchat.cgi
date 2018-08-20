@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #print "Content-type: text/html\n\n";
 #    gRSShopper 0.2  CChat  0.4  -- gRSShopper administration module
 #    12 April 2011 - Stephen Downes
@@ -22,11 +22,11 @@
 
 # Forbid agents
 
-if ($ENV{'HTTP_USER_AGENT'} =~ /bot|slurp|spider/) { 
+if ($ENV{'HTTP_USER_AGENT'} =~ /bot|slurp|spider/) {
   	print "Content-type: text/html; charset=utf-8\n";
 	print "HTTP/1.1 403 Forbidden\n\n";
-	print "403 Forbidden\n"; 
-	exit; 
+	print "403 Forbidden\n";
+	exit;
 }
 
 
@@ -52,22 +52,22 @@ our $lastharvest = time;
 
 # Initialize Session --------------------------------------------------------------
 
-					
+
 
 my $options = {}; bless $options;		# Initialize system variables
-our $cache = {}; bless $cache;	
-						
+our $cache = {}; bless $cache;
+
 our ($Site,$dbh) = &get_site($query);		# Get Site Information
 unless (defined $Site) { die "Site not defined."; }
 
 our $Person = {}; bless $Person;		# Get User Information
-&get_person($dbh,$query,$Person);		
+&get_person($dbh,$query,$Person);
 my $person_id = $Person->{person_id};
 
 
 
 # Analyze Request --------------------------------------------------------------------
-unless (defined $vars->{chat_thread} && $vars->{chat_thread}) { &select_backchannel($dbh,$query); exit; }
+unless (defined $vars->{chat_channel} && $vars->{chat_channel}) { &select_backchannel($dbh,$query); exit; }
 
 
 
@@ -90,7 +90,7 @@ if ($action) {						# Perform Action, or
 
 
 
-						
+
 &screen($dbh,$query);
 
 exit;
@@ -99,72 +99,44 @@ exit;
 
 #-------------------------------------------------------------------------------
 #
-#           Functions 
+#           Functions
 #
 #-------------------------------------------------------------------------------
 
 
-# -------   Header ------------------------------------------------------------
-
-sub header {
-
-	my ($dbh,$query,$table,$format,$title) = @_;
-	my $template = $Site->{lc($format) . "_header"} || lc($format) . "_header";
-
-	return &get_template($dbh,$query,$template,$title);
-
-}
-
-# -------   Footer -----------------------------------------------------------
-
-sub footer {
-
-	my ($dbh,$query,$table,$format,$title) = @_;
-	my $template = $Site->{lc($format) . "_footer"} || lc($format) . "_footer";
-	return &get_template($dbh,$query,$template,$title);
-
-
-}
-
-# -------  Make Admin Links -------------------------------------------------------
-#
-
-
-sub make_admin_links {
-
-	my ($input) = @_;
-
-
-
-}
 
 
 # -------   Display Comment (for big screen) --------------------------------------------
 #
-#   Displays itrem and updates queue
+#   Displays item and updates queue
 #
 
 sub display {
 
 	my ($dbh,$query,$table,$id_number,$format) = @_;
 	my $vars = $query->Vars;
-	return unless (defined $vars->{chat_thread} && $vars->{chat_thread});
+	return unless (defined $vars->{chat_channel} && $vars->{chat_channel});
 	print "Content-type: text/html; charset=utf-8\n\n";
-	my $stylesheet = $Site->{st_url}."css/cchat.css";
 
-	# Get Thread Information
-	my $thread = &db_get_record($dbh,"thread",{thread_id=>$vars->{chat_thread}});
 
-	# Inactive Threads
-	unless (&activated($dbh,$query,$thread)) {
+  my $stylesheet = $Site->{st_url}."assets/css/grsshopper_admin.css";
+#  my $stylesheet = $Site->{st_url}."css/cchat.css";
+
+
+	# Get channel Information
+
+	my $channel = &db_get_record($dbh,"channel",{channel_id=>$vars->{chat_channel}});
+
+	# Inactive channels
+	unless (&activated($dbh,$query,$channel)) {
 		my $display_url = $Site->{st_cgi}."cchat.cgi";
 		print qq|<html><head><title>Backchannel Inactive</title></head>
 			<body><h1>Backchannel Inactive</h1>
-			<p>Enter a new comment to activate; 
+			<p>Enter a new comment to activate;
 			reload this screen when content has been entered.
 			<form method="post" action="$display_url">
 			<input type="hidden" name="action" value="display">
-			<input type="hidden" name="chat_thread" value="$vars->{chat_thread}">
+			<input type="hidden" name="chat_channel" value="$vars->{chat_channel}">
 			<input type="submit" value="   Reload   "/></form></p>
 			</body></html>|;
 		exit;
@@ -172,11 +144,12 @@ sub display {
 
 
 	# Set Display Parameters
-	my $refresh = $thread->{thread_refresh}; unless ($refresh) { $refresh=10; }		# Refresh frequency
-	my $desc = $thread->{thread_description};								# Default Message
+	my $refresh = $channel->{channel_refresh}; unless ($refresh) { $refresh=10; }		# Refresh frequency
+  my $jsrefresh = ($refresh+2)*1000;  # Javasript refresh used as backup
+	my $desc = $channel->{channel_description};								# Default Message
 	my $activity_message .= " Updating every ".$refresh." seconds.";				# Activity Message
 	my $timestamp = localtime(time);									# Timestamp
-	my $textsize = $thread->{thread_textsize} || 36; $textsize.="pt";				# Text Size
+	my $textsize = $channel->{channel_textsize} || 14; $textsize.="pt";				# Text Size
 
 
 	# Print Display Header
@@ -185,39 +158,67 @@ sub display {
 		<link rel="stylesheet" type="text/css" href="$stylesheet" media="screen, projection, tv " />
 		<title>CChat Display Screen</title>
 		<meta http-equiv="refresh" content="$refresh">
-		</head><body>
-	|;
+
+    <!-- because 'refresh' stalls way too often -->
+    <script>
+      var timeout = setTimeout("location.reload(true);",$jsrefresh);
+      function resetTimeout() {
+         clearTimeout(timeout);
+         timeout = setTimeout("location.reload(true);",$jsrefresh);
+    }
+    </script>
+		</head><body>|;
 
 
-	# Poll for harvest update
 
+
+
+	# Poll for harvest updates
+
+  # Twitter
+  my $htrigger = 0;  # Toggle to make sure we don't harvest on the same cycle
 	my $twittermsg = "";
-	if ((time - 30) > $thread->{thread_twitterstatus}) {
+	if ((time - 25) > $channel->{channel_twitterstatus}) {
 
-		$twittermsg .= "Harvesting Twitter $thread->{thread_tag} <br>";
-	
-		$twittermsg .= &twitter_harvest($thread);
-	
-		&db_update($dbh,"thread", {thread_twitterstatus=>time}, $thread->{thread_id});
+		$twittermsg .= "Harvesting Twitter $channel->{channel_tag} <br>";
+
+		$twittermsg .= &twitter_harvest($channel);
+    $htrigger=1;
+		&db_update($dbh,"channel", {channel_twitterstatus=>time}, $channel->{channel_id});
+
 	}
 
-	
-	# Get Next Chat Message	
-	my $current = $thread->{thread_current}; unless ($current) { $current=1; }		# Current chat item
-	my $updated = $thread->{thread_updated}; unless ($updated) { $updated=1; }		# Thread last updated
+  # Mastodon
+  my $mastodonmsg = "";
+	if ((time - 35) > $channel->{channel_mastodonstatus} && $htrigger==0) {
 
-	my $chat;													# If refresh time has elapsed, 	
+		$mastodonmsg .= "Harvesting Mastodon $channel->{channel_tag} <br>";
+
+		$mastodonmsg .= &mastodon_harvest($channel);
+
+		&db_update($dbh,"channel", {channel_mastodonstatus=>time}, $channel->{channel_id});
+
+	}
+
+
+	# Get Next Chat Message
+	my $current = $channel->{channel_current}; unless ($current) { $current=1; }		# Current chat item
+	my $updated = $channel->{channel_updated}; unless ($updated) { $updated=1; }		# channel last updated
+
+	my $chat;													# If refresh time has elapsed,
 	if (time - $refresh > $updated) {									# try to find the next chat item
-		my $sql = qq|SELECT * FROM chat WHERE chat_thread = ? AND chat_id > ? ORDER BY chat_id LIMIT 1|;
+
+		my $sql = qq|SELECT * FROM chat WHERE chat_channel = ? AND chat_id > ? ORDER BY chat_id LIMIT 1|;
+
 		my $sth = $dbh->prepare($sql);
-		$sth->execute($thread->{thread_id},$current);
+		$sth->execute($channel->{channel_id},$current);
 		$chat = $sth->fetchrow_hashref();
 	}
 
-	if ($chat->{chat_id}) {										#  Next chat item found, update thread
+	if ($chat->{chat_id}) {										#  Next chat item found, update channel
 		$current = $chat->{chat_id};
-		&db_update($dbh,"thread", {thread_current=>$current,thread_updated=>time}, $thread->{thread_id});
-		
+		&db_update($dbh,"channel", {channel_current=>$current,channel_updated=>time}, $channel->{channel_id});
+
 	} else {												# No next item, just get the old chat item
 		$chat = &db_get_record($dbh,"chat",{chat_id=>$current});
 	}
@@ -225,13 +226,15 @@ sub display {
 	if ($chat->{chat_description}) { $desc = $chat->{chat_description}; }
 
 	# Display Page
-	my $tagnote; if ($thread->{thread_tag}) { $tagnote .= "Tag: <b>$thread->{thread_tag}</b>"; }
+  my $tag = "#".$channel->{channel_tag}; $tag =~ s/##/#/;
+	my $tagnote; if ($tag ne "#") { $tagnote .= "Tag: <b>$tag</b>"; }
 	if ($vars->{status}) { $vars->{status} = qq|<p class="notice">$vars->{status}</p>|; }
 
-
+  my $titlecolor = 'darkblue'; my $titlefontsize = $textsize-3;$titlefontsize.="px";
 	print qq|
-		Discussion Thread: $thread->{thread_id} $thread->{thread_title}. $tagnote<br/> 
-		$activity_message
+		<span class="chat_title" style="text-align:left; color: $titlecolor; font: $titlefontsize Verdana,Arial, sans-serif;">
+    Discussion channel: $channel->{channel_id} $channel->{channel_title}. $tagnote<br/>
+		$activity_message $twittermsg $mastodonmsg</span>
 		<p style="text-align:left; font: $textsize Verdana,Arial, sans-serif;">
 		$desc
 		</p>
@@ -248,21 +251,21 @@ sub display {
 
 sub activated {
 
-	my ($dbh,$query,$thread) = @_;
+	my ($dbh,$query,$channel) = @_;
 
-	my $latency = time - $thread->{thread_srefresh}; 
-	my $timeout = 1800;								# Threads time out at 1800 seconds (1/2 hour)
+	my $latency = time - $channel->{channel_srefresh};
+	my $timeout = 1800;								# channels time out at 1800 seconds (1/2 hour)
 
-	if ($latency < $timeout) {							# Thread is active
-		unless ($thread->{thread_active} eq "yes") {				#     recently!
-			&db_update($dbh,"thread", 
-				{thread_active=>'yes'}, $thread->{thread_id});	#     so we update it
+	if ($latency < $timeout) {							# channel is active
+		unless ($channel->{channel_active} eq "yes") {				#     recently!
+			&db_update($dbh,"channel",
+				{channel_active=>'yes'}, $channel->{channel_id});	#     so we update it
 		}
 		return 1;
-	} else {										# Thread is no longer active
-		unless ($thread->{thread_active} eq "no") {				#     recently!
-			&db_update($dbh,"thread", 
-				{thread_active=>'no'}, $thread->{thread_id});	#     so we update it
+	} else {										# channel is no longer active
+		unless ($channel->{channel_active} eq "no") {				#     recently!
+			&db_update($dbh,"channel",
+				{channel_active=>'no'}, $channel->{channel_id});	#     so we update it
 		}
 		return 0;
 	}
@@ -275,19 +278,19 @@ sub submit {
 
 	my ($dbh,$query,$table,$id_number) = @_;
 	my $vars = $query->Vars;
-	
+
 	my $table = "chat";
 	my $format = $vars->{format};
 
-	return unless (defined $vars->{chat_thread} && $vars->{chat_thread});
+	return unless (defined $vars->{chat_channel} && $vars->{chat_channel});
 	&error($dbh,$query,"","Database not ready") unless ($dbh);
 
 
 	while (my ($vx,$vy) = each %$vars) { &clean_chat(\$vars->{$vx}); }			# sanitize
 
-	# Get Thread Information
-	return unless (defined $vars->{chat_thread} && $vars->{chat_thread});
-	my $thread = &db_get_record($dbh,"thread",{thread_id=>$vars->{chat_thread}});
+	# Get channel Information
+	return unless (defined $vars->{chat_channel} && $vars->{chat_channel});
+	my $channel = &db_get_record($dbh,"channel",{channel_id=>$vars->{chat_channel}});
 
 
 					#Admin Functions
@@ -295,15 +298,15 @@ sub submit {
 
 
 
-	if (($Person->{person_id} eq $thread->{thread_creator}) || ($Person->{person_status} eq "admin")) {
+	if (($Person->{person_id} eq $channel->{channel_creator}) || ($Person->{person_status} eq "admin")) {
 
 
 		# Tag
 		if ($vars->{chat_description} =~ s/^tag:(.*?)/$1/) {
 			$vars->{chat_description} =~ s/^ //g;
-			if (&db_update($dbh,"thread", {thread_tag=>$vars->{chat_description}}, $thread->{thread_id})) {
-				$vars->{status}="success";$vars->{msg} .= "Thread Tag: $vars->{chat_description}"; }
-			else { $vars->{status}="fail";$vars->{msg} .= "Thread Activity update failed"; }
+			if (&db_update($dbh,"channel", {channel_tag=>$vars->{chat_description}}, $channel->{channel_id})) {
+				$vars->{status}="success";$vars->{msg} .= "channel Tag: $vars->{chat_description}"; }
+			else { $vars->{status}="fail";$vars->{msg} .= "channel Activity update failed"; }
 			&show_form($dbh,$query);
 		}
 
@@ -311,26 +314,44 @@ sub submit {
 		# Textsize
 		if ($vars->{chat_description} =~ s/^textsize:(.*?)/$1/) {
 			$vars->{chat_description} =~ s/^ //g;
-			if (&db_update($dbh,"thread", {thread_textsize=>$vars->{chat_description}}, $thread->{thread_id})) {
-				$vars->{status}="success";$vars->{msg} .= "Thread Textsize: $vars->{chat_description}"; }
-			else { $vars->{status}="fail";$vars->{msg} .= "Thread Textsize update failed"; }
+			if (&db_update($dbh,"channel", {channel_textsize=>$vars->{chat_description}}, $channel->{channel_id})) {
+				$vars->{status}="success";$vars->{msg} .= "channel Textsize: $vars->{chat_description}"; }
+			else { $vars->{status}="fail";$vars->{msg} .= "channel Textsize update failed"; }
 			&show_form($dbh,$query);
 		}
-	
-	
+
+
 		# Refresh
 		if ($vars->{chat_description} =~ s/^refresh:(.*?)/$1/) {
 			$vars->{chat_description} =~ s/^ //g;
 			if ($vars->{chat_description} < 10) {
 				$vars->{chat_description} = 10;
-				$vars->{msg} .= "Cannot set refresh less than 10 seconds"; 
+				$vars->{msg} .= "Cannot set refresh less than 10 seconds";
 			}
-			if (&db_update($dbh,"thread", {thread_refresh=>$vars->{chat_description}}, $thread->{thread_id})) {
-				$vars->{status}="success";$vars->{msg} .= "Thread Refresh: $vars->{chat_description}"; }
-			else { $vars->{status}="fail";$vars->{msg} .= "Thread Refresh update failed"; }
+			if (&db_update($dbh,"channel", {channel_refresh=>$vars->{chat_description}}, $channel->{channel_id})) {
+				$vars->{status}="success";$vars->{msg} .= "channel Refresh: $vars->{chat_description}"; }
+			else { $vars->{status}="fail";$vars->{msg} .= "channel Refresh update failed"; }
 			&show_form($dbh,$query);
 		}
-	
+
+    # Clear Backlog
+		if ($vars->{chat_description} =~ s/^backlog:clear//) {
+			$vars->{chat_description} =~ s/^ //g;
+
+print "Content-type: text/html\n\n";
+      my $sql = qq|SELECT chat_id FROM chat WHERE chat_channel=?|;
+      my $sth = $dbh->prepare($sql) || print "Database Error<br/>";
+    	$sth->execute($channel->{channel_id});
+    	my $page_text = "";
+    	while (my $s = $sth -> fetchrow_hashref()) {
+         &db_update($dbh,"chat",{chat_shown=>"1"},$s->{chat_id});
+      }
+      $vars->{msg}="Backlog cleared. ";
+			#if (&db_update($dbh,"chat", {chat_shown=>1}, {chat_channel=>$channel->{channel_id}})) {
+		#		$vars->{status}="success";$vars->{msg} .= "channel backlog cleared"; }
+		#	else { $vars->{status}="fail";$vars->{msg} .= "channel backlog clear failed"; }
+			&show_form($dbh,$query);
+		}
 
 		# Help
 		if ($vars->{chat_description} =~ s/^admin:(.*?)/$1/) {
@@ -338,9 +359,10 @@ sub submit {
 			if ($vars->{chat_description} eq "help") {
 
 				$vars->{help} = qq|Admin commands:
-tag:xxx        -- set the tag for this thread
+tag:xxx        -- set the tag for this channel
 textsize:xx    -- display text size xx pt
 refresh:xx     -- display a new chat comment every xx seconds
+backlog:clear  -- skip backlogged messages and start fresh
 admin:help     -- display this help screen
 admin:panel    -- display the admin panel
 Just ckick [Submit] to clear this form
@@ -349,7 +371,7 @@ Just ckick [Submit] to clear this form
 			}
 		&show_form($dbh,$query);
 		}
-	
+
 
 		# Clear
 		if ($vars->{chat_description} =~ s/^Admin commands:(.*?)/$1/) {
@@ -365,13 +387,24 @@ Just ckick [Submit] to clear this form
 
 	# Create Record
 
+
 	$vars->{chat_crdate} = time;
 	$vars->{chat_creator} = $Person->{person_id};
 	$vars->{chat_crip} = $ENV{'REMOTE_ADDR'};
+  $vars->{chat_tag} = $channel->{channel_tag};
 
 	my $id_number = &db_insert($dbh,$query,$table,$vars);
-	if ($id_number) {	$vars->{msg} .= "Comment submitted. ";$vars->{status}="success"; }
-	else { $vars->{msg} .= "Error, comment not created.";$vars->{status}="fail"; }
+
+	if ($id_number) {
+    $vars->{msg} .= "Comment submitted. ";$vars->{status}="success";
+    if ($vars->{post_twitter}) {
+       $vars->{msg} .=  &twitter_post($dbh,"chat",$id_number,$vars->{chat_description} );
+    }
+    if ($vars->{post_mastodon}) { print "Content-type: text/html\n\n";print "Need to post to Mastodon";
+       $vars->{msg} .=  &mastodon_post($dbh,"chat",$id_number,$vars->{chat_description} );
+    }
+
+  } else { $vars->{msg} .= "Error, comment not created.";$vars->{status}="fail"; }
 	&show_form($dbh,$query,$id_number);
 	return $id_number;
 
@@ -384,7 +417,7 @@ sub clean_chat {
 	my ($txt_ptr) = @_;
 
 	$$txt_ptr =~ s/#!//g;					# No programs!
-	$$txt_ptr =~ s/'/&apos;/g;				# No sql injection!
+	$$txt_ptr =~ s/'/&apos;/g;				# No sql injection! #'
 	$$txt_ptr =~ s/<(\/|)(a|e|t|script)(.*?)>//sig;	# No links, embeds, tables, scripts
 	$$txt_ptr =~ s/(\r|\n)//mgi;				# Kill returns
 	$$txt_ptr =~ s/(viagra|areaseo|carisoprodol|holdem|phentermine|ultram| pills| loans|tramadol|cialis|penis|handbag| shit | cock | fuck | fucker | cunt | motherfucker | ass )/*bleep*/gi;
@@ -398,7 +431,7 @@ sub show_form {
 	my ($dbh,$query,$new_id) = @_;
 	my $vars = $query->Vars;
 	my $pname = $Person->{person_name} || $Person->{person_title};
-	
+
 #	&login_required($dbh,$query);
 
 	# JSON Return for API
@@ -414,32 +447,33 @@ sub show_form {
 		exit;
 	}
 
-	print "Content-type: text/html; charset=utf-8\n\n";	
+	print "Content-type: text/html; charset=utf-8\n\n";
 
 	my $table = "chat";
-	my $thread = &db_get_record($dbh,"thread",{thread_id=>$vars->{chat_thread}});
-	unless (defined $vars->{chat_thread} && $vars->{chat_thread}) {
-		print qq|<h2>Backchannel not defined</h2><p>No thread number provided</p>|;
+	my $channel = &db_get_record($dbh,"channel",{channel_id=>$vars->{chat_channel}});
+	unless (defined $vars->{chat_channel} && $vars->{chat_channel}) {
+		print qq|<h2>Backchannel not defined</h2><p>No channel number provided</p>|;
 		exit;
 	}
-	unless ($thread) {
+	unless ($channel) {
 		print qq|<h2>Backchannel not defined</h2><p>You asked for backchannel number
-			$vars->{chat_thread} but it doesn't exist|;
+			$vars->{chat_channel} but it does not exist|;
 		exit;
 	}
 
 						# Set record ID number, value
 
 	unless ($dbh) { &error($dbh,$query,"","Database not ready") }
+	use CGI::Carp qw(fatalsToBrowser);
 
-
-						# Activate Thread
+						# Activate channel
 	my $activetime = time;
-	&db_update($dbh,"thread", {thread_srefresh=>$activetime}, $thread->{thread_id});
+	&db_update($dbh,"channel", {channel_srefresh=>$activetime}, $channel->{channel_id});
+
 
 						# Print Titles
 
-	if (($Person->{person_id} eq $thread->{thread_creator}) || ($Person->{person_status} eq "admin")) {
+	if (($Person->{person_id} eq $channel->{channel_creator}) || ($Person->{person_status} eq "admin")) {
 		$vars->{msg} .= " Enter admin:help for options";
 	}
 
@@ -449,31 +483,40 @@ sub show_form {
 
 						# Print Form
 	my $chat_url = $Site->{st_cgi}."cchat.cgi";
-	my $archive_url = $Site->{st_cgi}."cchat.cgi?action=archives&chat_thread=$vars->{chat_thread}";
+  my $channelid = $channel->{channel_id};
+	my $archive_url = $Site->{st_cgi}."cchat.cgi?action=archives&chat_channel=$vars->{chat_channel}";
 	my $stylesheet = $Site->{st_url}."/css/cchat.css";
 	print qq|
 		<html>
 		<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-		<link rel="stylesheet" type="text/css" 
-			href="$stylesheet" 
+		<link rel="stylesheet" type="text/css"
+			href="$stylesheet"
 			media="screen, projection, tv " />
+    <link rel="stylesheet" href="|.$Site->{st_url}.qq|assets/css/font-awesome.5.0.6.all.css">
 		<title>Submission Form</title>
   		<script type="text/javascript" src="http://www.downes.ca/downes.js"></script>
 		</head>
 		<body>
 		<form method="post" action="$Site->{script}">
 		<input type="hidden" name="action" value="update">
-		<input type="hidden" name="chat_thread" value="$vars->{chat_thread}">
-		<table border=1 cellpadding=2 cellspacing=0>\n
-		<tr><td colspan="4">$vars->{msg}<br/>
-		<textarea name="chat_description" cols="80" rows="5">$vars->{help}</textarea></td>
+		<input type="hidden" name="chat_channel" value="$vars->{chat_channel}">
+		<table border=1 cellpadding=2 cellspacing=0 style="width:99%;">\n
+		<tr><td colspan="4">$vars->{msg}
+    <span style="float:right;"><a href="|.$chat_url.qq|?action=display&chat_channel=$channelid" target="_new"
+             title="Display chat in its own screen">
+
+    <i class="fa fa-desktop" style="color:green;font-size:1.2em;"></i></a></span><br/>
+		<textarea placeholder="Type a comment and click submit" name="chat_description" style="width:99%;height:5em;">$vars->{help}</textarea>
+    </td>
 		<tr>
-		<td>Signature</td>
-		<td colspan="3"><input type="text" value="$pname" name="chat_signature" size="50"></td>
+		<td colspan="4"><input type="text" placeholder="Signature" value="$pname" name="chat_signature" style="width:99%;"></td>
 		<tr><td colspan="4">
-		<input type="submit" name="button" value="Submit"> [<a href="$chat_url" target="_top">Select Another Backchannel</a>]
-		[<a href="$archive_url" target="_top">Backchannel archives</a>]
+    Also <input type="checkbox" name="post_twitter"> Post to Twitter
+    <input type="checkbox" name="post_mastodon"> Post to Mastodon
+    </td></tr>
+    <tr><td colspan="4">
+		<input type="submit" name="button" value="Submit">
 		</table></form>\n
 		</body>
 		</html>
@@ -491,8 +534,8 @@ sub screen {
 
 	print "Content-type: text/html; charset=utf-8\n\n";
 	my $stylesheet = $Site->{st_url} . "css/cchat.css";
-	my $display_url = $Site->{st_cgi}."cchat.cgi?action=display&chat_thread=".$vars->{chat_thread};
-	my $form_url = $Site->{st_cgi}."cchat.cgi?action=form&chat_thread=".$vars->{chat_thread};
+	my $display_url = $Site->{st_cgi}."cchat.cgi?action=display&chat_channel=".$vars->{chat_channel};
+	my $form_url = $Site->{st_cgi}."cchat.cgi?action=form&chat_channel=".$vars->{chat_channel};
 
 #print "$display_url <p>";
 
@@ -500,17 +543,23 @@ sub screen {
 		<html>
 		<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-		<link rel="stylesheet" type="text/css" 
-			href="$stylesheet" 
+		<link rel="stylesheet" type="text/css"
+			href="$stylesheet"
 			media="screen, projection, tv " />
 		<title>CChat - by Stephen Downes</title>
 		</head>
-		<iframe src ="$display_url" 
-			width="100%" height="65%">
+    <p><button type="button" onclick="window.location.href='|.
+    $Site->{st_cgi}.qq|cchat.cgi';">Exit Channel</button>
+    <button type="button" onclick="parent.openDiv('|.
+      $Site->{st_cgi}.qq|api.cgi','main','edit','channel','|.$vars->{chat_channel}.qq|','Edit','Edit');">Manage This Channel</button>
+    <button type="button"  onclick="window.location.href='|.
+    $Site->{st_cgi}.qq|cchat.cgi?action=archives&chat_channel=|.$vars->{chat_channel}.qq|';">History</button></p>
+ 		<iframe src ="$display_url"
+			width="100%" height="60%"  frameBorder="0">
   			<p>Your browser does not support iframes.</p>
 		</iframe>
-		<iframe src ="$form_url" 
-			width="100%" height="30%">
+		<iframe src ="$form_url"
+			width="100%" height="30%"  frameBorder="0">
   			<p>Your browser does not support iframes.</p>
 		</iframe>
 	|;
@@ -529,15 +578,14 @@ sub select_backchannel {
 	my $backchannel = $Site->{st_url} . "create_backchannel.htm";
 
 	print "Content-type: text/html; charset=utf-8\n\n";
-
-	print &header($dbh,$query,"thread","page","Select Backchannel");
-
-
-
-	my $page_text = qq|<h2>Backchannels</h2>
-		<p>A backchannel is a real-time online chat between participants 
-            in an event or conference. To participate in a backchannel, 
-            click on the topic of your choice.</p>|;
+  print qq|<body style="margin:5px;"><head><title>Select Backchannel</title>
+     <link rel="stylesheet" href="|.$Site->{st_url}.qq|assets/css/grsshopper_admin.css">
+     </head><body>
+        <p><button type="button" onclick="parent.openDiv('|.$Site->{st_cgi}.qq|api.cgi','main','edit','channel','new','','Edit');">Create Channel</button>
+        <button type="button">Join a Channel</button>
+        <button type="button"  onclick="window.location.href='|.
+        $Site->{st_cgi}.qq|admin.cgi?db=channel&action=list'">Manage Channels</button></p>
+     |;
 
 
 
@@ -546,18 +594,16 @@ sub select_backchannel {
 	if (($Person->{person_status} eq "admin") || ($Person->{person_status} eq "registered")) {
 
 		my $my_text="";
-		my $ary_ref = &find_records($dbh,{table=>"thread",thread_creator=>$Person->{person_id}});
-		foreach my $t (@$ary_ref) { 
-			my $ref = &db_get_record($dbh,"thread",{thread_id=>$t});
-			my $url = $Site->{st_cgi}."cchat.cgi?chat_thread=$t";
-			$my_text .= qq|<li> <a href="$url">$ref->{thread_title}</a>|;
-			if ($ref->{thread_active} eq "yes") { $my_text .= qq| <span style="color:#008800;">Active!</span>|; }
+		my $ary_ref = &find_records($dbh,{table=>"channel",channel_creator=>$Person->{person_id}});
+		foreach my $t (@$ary_ref) {
+			my $ref = &db_get_record($dbh,"channel",{channel_id=>$t});
+			my $url = $Site->{st_cgi}."cchat.cgi?chat_channel=$t";
+			$my_text .= qq|<li class="table-list-element"> <a href="$url">$ref->{channel_title}</a>|;
+			if ($ref->{channel_active} eq "yes") { $my_text .= qq| <span style="color:#008800;">Active!</span>|; }
 			$my_text .= "</li>";
 		}
-		if ($my_text) { 
-			$my_text = qq|<p><b>My Backchannels</b></p><p>When you create a backchannel,
-                      it shows up here. Make your backchannel <i>active</i> by entering it.
-                      Active backchannels may be viewed and entered by other users.</p><ul>|.$my_text."</ul>";
+		if ($my_text) {
+			$my_text = qq|<p><b>My Channels</b><ul class='table-list'>|.$my_text."</ul>";
             }
 		$page_text .= $my_text;
 
@@ -566,40 +612,29 @@ sub select_backchannel {
 								# Display Active Backchannels
 
 
-	$page_text .= qq|<p><b>Active Backchannels</b></p><p>Active backchannels are live
-                      chat discussions that are currently taking place. Enter a backchannel
-                      by clicking on the backchannel topic name.</p>|;
+
 	my $ac_text="";
-	my $ary_ref = &find_records($dbh,{table=>"thread",thread_active=>"yes"});
-	foreach my $t (@$ary_ref) { 
-		my $ref = &db_get_record($dbh,"thread",{thread_id=>$t});
-		my $url = $Site->{st_cgi}."cchat.cgi?chat_thread=$t";
-		$ac_text .= qq|<li> <a href="$url">$ref->{thread_title}</a></li>|;
+	my $ary_ref = &find_records($dbh,{table=>"channel",channel_active=>"yes"});
+	foreach my $t (@$ary_ref) {
+		my $ref = &db_get_record($dbh,"channel",{channel_id=>$t});
+		my $url = $Site->{st_cgi}."cchat.cgi?chat_channel=$t";
+		$ac_text .= qq|<li class="table-list-element"> <a href="$url">$ref->{channel_title}</a></li>|;
 	}
-	if ($ac_text) { 
-		$ac_text = "<ul>\n".$ac_text."\n</ul>\n"; 
-		if (($Person->{person_status} eq "admin") || ($Person->{person_status} eq "registered")) {
-			$ac_text .= qq|<p>[<a href="$backchannel">Create a new backchannel?</a>]</p>|;	
-		}
-	} else { 
-		$ac_text = "<p>No active backchannels.</p>"; 
-		if (($Person->{person_status} eq "admin") || ($Person->{person_status} eq "registered")) {
-			$ac_text .= qq|<p>Why not <a href="$backchannel">create a new backchannel?</a></p>|;	
-		}
+
+	if ($ac_text) {
+		$ac_text = "<b>Active Channels</b><ul class='table-list'>\n".$ac_text."\n</ul>\n";
+	} else {
+		$ac_text = "<p>No active backchannels.</p>";
+
 	}
 	$page_text .= $ac_text;
 
 
-								# Administer Backchannels
-
-	if ($Person->{person_status} eq "admin") {
-		$page_text .=  qq|<p>[<a href="|.$Site->{st_cgi}.qq|admin.cgi?db=thread&action=list">Aminister Backchannels</a>]</p>|;
-	}
 
 
 	print $page_text;
-	print &footer($dbh,$query,"thread","page","Select Backchannel");
 
+  print qq|</body></html>|;
 
 }
 
@@ -620,11 +655,11 @@ sub search_twitter {
 	      since=>"2010-03-21"
 	   });
 	   for my $status ( @{$r->{results}} ) {
-	
+
 		# No injections from Twitter, thank you
 		while (my ($vkey,$vval) = each %$status) {
 			$vars->{$vkey} =~ s/#!//g;					# No programs!
-			$vars->{$vkey} =~ s/'/&apos;/g;				# No sql injection!
+			$vars->{$vkey} =~ s/'/&apos;/g;				# No sql injection! #'
 			$vars->{$vkey} =~ s/<(\/|)(a|e|t|script)(.*?)>//sig;	# No links, embeds, tables, scripts
 			$vars->{$vkey} =~ s/(\r|\n)//mgi;				# Kill returns
 		}
@@ -632,7 +667,7 @@ sub search_twitter {
 		unless (&db_locate($dbh,"chat",{chat_description => $status->{text}})) {
 
 			# Create Record
-	
+
 			$vars->{chat_crdate} = time;
 			$vars->{chat_creator} = "1";
 			$vars->{chat_crip} = "127.0.0.1";
@@ -643,7 +678,7 @@ sub search_twitter {
 	   }
 	};
 	if ( my $err = $@ ) {
-		$vars->{msg} .= "Twitter update error  $err->code $err->message."; 
+		$vars->{msg} .= "Twitter update error  $err->code $err->message.";
 		return;
 	#   die $@ unless blessed $err && $err->isa('Net::Twitter::Error');
 
@@ -664,20 +699,20 @@ sub chat_archives {
 
 	my ($dbh,$query,$msg) = @_;
 	my $vars = $query->Vars;
-	my $cth = $vars->{chat_thread};
+	my $cth = $vars->{chat_channel};
 
-	my $thread = &db_get_record($dbh,"thread",{thread_id=>$vars->{chat_thread}});	
+	my $channel = &db_get_record($dbh,"channel",{channel_id=>$vars->{chat_channel}});
 	print "Content-type: text/html; charset=utf-8\n\n";
 
 	my $desc; if ($vars->{opt} eq "reverse") { $desc = ""; } else { $desc = " DESC"; }
 	my $eesc; if ($vars->{opt} eq "reverse") { $eesc = ""; } else { $eesc = "&opt=reverse"; }
-	my $sql = "SELECT * FROM chat WHERE chat_thread='$cth' ORDER BY chat_crdate$desc";
+	my $sql = "SELECT * FROM chat WHERE chat_channel='$cth' ORDER BY chat_crdate$desc";
 	my $sth = $dbh->prepare($sql) || print "Database Error<br/>";
 	$sth->execute();
 
 	my $page_text = "";
 	while (my $s = $sth -> fetchrow_hashref()) {
-	
+
 		my $cdsk_url = $Site->{st_cgi}."page.cgi?chat=".$s->{chat_id};
 		if ($vars->{format} eq "xml") {
 			my $ctime = &rfc822_date($s->{chat_crdate});
@@ -685,10 +720,10 @@ sub chat_archives {
 <item>
    <title>$s->{chat_signature}</title>
    <link>$cdsk_url</link>
-   <description><![CDATA[$s->{chat_description} 
-		<a href="$cdsk_url">Thread</a>]]></description>
+   <description><![CDATA[$s->{chat_description}
+		<a href="$cdsk_url">channel</a>]]></description>
    <pubDate>$ctime</pubDate>
-   <guid>$cdsk_url</guid>     
+   <guid>$cdsk_url</guid>
 </item>
 |;
 		} else {
@@ -700,13 +735,13 @@ sub chat_archives {
 
 	if ($vars->{format} eq "xml") {
 		my $nowctime = &rfc822_date(time);
-		my $cchan_url = $Site->{st_cgi}."cchat.cgi?chat_thread=$thread->{thread_id}";
+		my $cchan_url = $Site->{st_cgi}."cchat.cgi?chat_channel=$channel->{channel_id}";
 		print qq|<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
    <channel>
-      <title>$thread->{thread_title}</title>
+      <title>$channel->{channel_title}</title>
       <link>$cchan_url</link>
-      <description>$thread->{thread_description}</description>
+      <description>$channel->{channel_description}</description>
       <language>en-us</language>
       <pubDate>$nowctime</pubDate>
       <lastBuildDate>$nowctime</lastBuildDate>
@@ -728,19 +763,19 @@ $page_text
 		<html>
 		<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-		<link rel="alternate" type="application/rss+xml" title="RSS" 
-			$Site->{st_cgi}cchat.cgi?chat_thread=$thread->{thread_id}&action=archives&format=xml" />
-		<link rel="stylesheet" type="text/css" 
-			href="$stylesheet" 
+		<link rel="alternate" type="application/rss+xml" title="RSS"
+			$Site->{st_cgi}cchat.cgi?chat_channel=$channel->{channel_id}&action=archives&format=xml" />
+		<link rel="stylesheet" type="text/css"
+			href="$stylesheet"
 			media="screen, projection, tv " />
 		<title>CChat - by Stephen Downes</title>
 		</head>
 		<body>
-		<h1>$thread->{thread_title}<br />Archives</h1>
+		<h1>$channel->{channel_title}<br />Archives</h1>
 		<script language="Javascript">login_box();</script>
-		<p>[<a href="$Site->{st_cgi}cchat.cgi?chat_thread=$thread->{thread_id}">Return to Thread $vars->{chat_thread}</a>]
-[<a href="$Site->{st_cgi}cchat.cgi?chat_thread=$thread->{thread_id}&action=archives$eesc">Reverse Order</a>]
-[<a href="$Site->{st_cgi}cchat.cgi?chat_thread=$thread->{thread_id}&action=archives&format=xml">XML</a>]</p>
+		<p>[<a href="$Site->{st_cgi}cchat.cgi?chat_channel=$channel->{channel_id}">Return to channel $vars->{chat_channel}</a>]
+[<a href="$Site->{st_cgi}cchat.cgi?chat_channel=$channel->{channel_id}&action=archives$eesc">Reverse Order</a>]
+[<a href="$Site->{st_cgi}cchat.cgi?chat_channel=$channel->{channel_id}&action=archives&format=xml">XML</a>]</p>
 		<table>
 		$page_text
 		</table>
@@ -753,11 +788,14 @@ $page_text
 
 sub twitter_harvest {
 
-	my ($thread) = @_;
+	my ($channel) = @_;
+
+  return unless ($channel->{channel_tag});      # Harvest ONLY if there is a tag
+  my $tag = "#".$channel->{channel_tag};
 
 
 	my $returnmsg = "";
-	my $tag = $thread->{thread_tag} || "altc2013";
+
 
 	&error($dbh,"","","Twitter posting requires values for consumer key, consumer secret, token and token secret")
 		unless ($Site->{tw_cckey} && $Site->{tw_csecret} && $Site->{tw_token} && $Site->{tw_tsecret});
@@ -768,35 +806,35 @@ sub twitter_harvest {
 		access_token_secret => $Site->{tw_tsecret},
 		ssl                 => 1,  ## enable SSL! ##
 	);
-	
+
 # my $result = $nt->update('Hello, world!');
 
 my $r = "";
   eval { $r = $nt->search($tag); };
   if ( my $err = $@ ) {
-   
+
 
       print "HTTP Response Code: ", $err->code, "\n",
            "HTTP Message......: ", $err->message, "\n",
            "Twitter error.....: ", $err->error, "\n";
-  }	
+  }
 
-	while (my($rx,$ry) = each %$r) { 
+	while (my($rx,$ry) = each %$r) {
 		if ($rx eq "search_metadata") {
 	#		while (my($mrx,$mry) = each %$ry) { print "$mrx = $mry <br>"; }
 		}
-		
+
 		elsif ($rx eq "statuses") {
-			foreach my $status (@$ry) { 
+			foreach my $status (@$ry) {
 				next if ($status->{text} =~ /^RT/);		# Skip retweets (the bane of twitter)
 				my $item;my $chat; my $userstr = "";
-				while (my($srx,$sry) = each %$status) { 
+				while (my($srx,$sry) = each %$status) {
 					if ($srx eq "user") {			# Get user info
 						$item->{screen_name} = $sry->{screen_name};
 						$item->{name} = $sry->{name};
 						$item->{profile_image_url_https} = $sry->{profile_image_url_https};
 					}
-					
+
 				}
 				my ($created,$garbage) = split / \+/,$status->{created_at};
 				$status->{text} =~ s/\x{201c}/ /g;	# "
@@ -804,24 +842,24 @@ my $r = "";
 				$chat->{chat_link} = "https://twitter.com/".$item->{screen_name}."/status/".$status->{id};
 				$chat->{chat_title} = $status->{text};
 				$status->{text} =~ s/#(.*?)( |:)/<a href="https:\/\/twitter.com\/search?q=%23$1&src=hash"  target="_blank">#$1<\/a> /g;
-				$status->{text} =~ s/http:(.*?)("|”|$| )/<a href="http:$1" target="_blank">http:$1<\/a> /g;		
-				$status->{text} =~ s/\@(.*?)( |:)/<a href="https:\/\/twitter.com\/$1" target="_blank">\@$1<\/a> /g;				
-				$chat->{chat_description} = qq| 
+				$status->{text} =~ s/http:(.*?)("|ï¿½|$| )/<a href="http:$1" target="_blank">http:$1<\/a> /g;
+				$status->{text} =~ s/\@(.*?)( |:)/<a href="https:\/\/twitter.com\/$1" target="_blank">\@$1<\/a> /g;
+				$chat->{chat_description} = qq|
 					<img src="$item->{profile_image_url_https}" align="left" hspace="10">
 					<a href="$chat->{chat_link}">\@|.$item->{screen_name}.qq|</a>: |.
 					$status->{text} . "";
 				$chat->{chat_signature} = "Twitter";
 				$chat->{chat_crdate} = time;
-				$chat->{chat_thread} = $thread->{thread_id};
+				$chat->{chat_channel} = $channel->{channel_id};
 				$chat->{chat_creator} = $Person->{person_id};
 				$chat->{chat_crip} = $ENV{'REMOTE_ADDR'};
 
-				if (my $cid = &db_locate($dbh,"chat",{chat_link => $chat->{chat_link}})) { 
+				if (my $cid = &db_locate($dbh,"chat",{chat_link => $chat->{chat_link}})) {
 					# Nothing
 				} else {
 					my $id_number = &db_insert($dbh,$query,"chat",$chat);
 				}
-			
+
 			}
 
 
@@ -833,7 +871,7 @@ my $r = "";
 	#return $id_number;
 	#		&save_item($feed,$item);
 		}
-	}	
+	}
 
 	return $returnmsg;
 }
