@@ -133,8 +133,9 @@ sub process_initialization_form {
 
 	# Open the multisite configuration file,
 	# Initialize if file can't be found or opened
-	my $data_directory = 	$vars->{st_cgif}."data/";
-	my $data_file =  $data_directory . "multisite.txt";			# I want to make this changeable
+	# my $data_directory = 	$vars->{st_cgif}."data/";   # Not ideal because I prefer to allow people to choose alternative locations
+  my $data_directory = "./data";
+	my $data_file =  $data_directory . "/multisite.txt";			# I want to make this changeable
 	my $new_data_file = "";
 
   # Check for the data firectory
