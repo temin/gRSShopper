@@ -1,8 +1,6 @@
 #    gRSShopper 0.7  Common Functions  0.83  --
 
-my $dirname = dirname(__FILE__);
-require $dirname . "/analyze.pl";
-
+require "analyze.pl";
 
 #-------------------------------------------------------------------------------
 
@@ -48,12 +46,10 @@ sub load_modules {
 	use LWP::Simple;
 
 
-
 	# Added by Luc - Support for french (or other) dates
 	# Required by : locale_date
 	use POSIX qw(locale_h);
 	use POSIX qw(strftime);
-  use POSIX qw(tzset);   # for time zones
 	use Scalar::Util 'looks_like_number';
 	use Date::Parse;
 
@@ -189,7 +185,6 @@ sub get_site {
 	# File Upload Limit
 	my $upload_limit = $Site->{file_limit} || 10000;
 	$CGI::POST_MAX = 1024 * $upload_limit;
-#&send_email("stephen\@downes.ca","stephen\@downes.ca","Returning $context... $Site,$dbh  ","Args: $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n");
 
 	return ($Site,$dbh);
 
@@ -206,9 +201,6 @@ sub get_config {
 	}
 	$sth->finish();
 
-  # Set the time zones
-  if ($Site->{st_timezone}) { $ENV{TZ} = $Site->{st_timezone}; }
-
 }
 	# -------   Get Person ---------------------------------------------------------
 	#
@@ -222,10 +214,10 @@ sub get_person {
 								# and exit
 
 										# Confirm cron key
-		my $cronkey = $ARGV[1] || $vars->{cronkey};
+		my $cronkey = $ARGV[1];
 		unless ($Site->{cronkey} eq $cronkey) {
 
-			print &printlang("Cron key ".$Site->{cronkey}." mismatch",$vars->{cronkey},$Site->{st_name});
+			print &printlang('Cron key mismatch',$vars->{cronkey},$Site->{st_name});
 			&send_email("stephen\@downes.ca","stephen\@downes.ca",
 				&printlang("Cron Error",$Site->{st_name}),
 				"Cron key mismatch between $Site->{cronkey} and  $cronkey in get_person() - Args: $ARGV[0] - $ARGV[1] - $ARGV[2] - $ARGV[3]");
@@ -574,20 +566,13 @@ sub permission_default {
 
 sub quick_show_page {
 
-	my ($page_dir,$table,$id,$format) = @_;
-
-	my $page_file = $page_dir.$table."/".$id.".".$format;
-
+	my ($page_dir,$table,$id) = @_;
+	my $page_file = $page_dir.$table."/".$id;
 	return unless (-e $page_file);
-  print "Content-type: text/html\n\n";
+	#print "Content-type: text/html\n\n";
 	open FILE, $page_file or die $!;
 	while (<FILE>) { print $_; }
 	close FILE;
-  &record_hit($table,$id);
-  if ($format eq "viewer") {
-    &record_was_read($table,$id);
-	  &output_record($dbh,$query,$table,$id,$format);
-  }  # Updates cache version after read in viewer
 	exit;
 }
 
@@ -653,7 +638,7 @@ sub output_record {
 
 
 	# Add headers and footers
-	if ($table eq "post" && $format =~ /^htm/) {
+	unless ($table eq "page" || $table eq "template" || $context eq "api") {
 	$record->{page_content} =
 		&db_get_template($dbh,$header_template,$record->{page_title}) .
 		$record->{page_content} .
@@ -675,12 +660,10 @@ sub output_record {
 	# Print Cache version to file
 	my $page_dir = $Site->{st_urlf}.$table;
 	unless (-d $page_dir) { mkdir($page_dir,0755); }
-	my $page_file = $Site->{st_urlf}.$table."/".$id_number.".".$format;
+	my $page_file = $Site->{st_urlf}.$table."/".$id_number;
 	open FILE, ">$page_file" or die $!;
-	print FILE $output or die "Print failure: $!";
+	print FILE $output;
 	close FILE;
-
-
 														# Fill special Admin links and post-cache data
 
 	&make_pagedata($query,\$wp->{page_content},\$wp->{page_title});
@@ -1169,7 +1152,6 @@ sub list_records {
 
 	# Special search condition for feed, to list active feeds
 	if ($table eq "feed") {
-			$vars->{harvestable} ||= "Active";						# Default to feeds we're actually harvesting
       if ($vars->{harvestable} eq "Active") {
 		    if ($where) { $where .= " AND "; } else { $where .= "WHERE "; }
         $where .= qq|(feed_link <> '')|;
@@ -1259,7 +1241,7 @@ sub list_records {
           my $starting_tab = "Edit";
 				  if ($table eq "person") { $starting_tab = "Identity-tab"; }
 		      $record_text = qq|<li class="table-list-element" id="$table-$rid">
-            <span title="Edit" onClick="openDiv('$onclickurl','main','edit','$table','$rid','$starting_tab');">$recordstatus <i class="fa fa-edit"></i></span>
+            <span title="Edit" onClick="openDiv('$onclickurl','main','edit','$table','$rid','$starting_tab','$starting_tab');">$recordstatus <i class="fa fa-edit"></i></span>
 						<span title="Delete" onClick="record_delete('$onclickurl','$table','$rid');"><i class="fa fa-cut"></i></span>
 					  <a href="#" onClick="openDiv('$onclickurl','Reader','show','$table','$rid','Reader');">$record_title</a></li>|;
 			}
@@ -1300,10 +1282,9 @@ sub list_search_form {
   # Set up list of serach field options
 	my $titoptions = "";
 	my @columns = &db_columns($dbh,$table);
-	my @selections = qw(name title description content code email link type id);
+	my @selections = qw(name title description content code email link type);
 	foreach my $sc (@selections) {
-      my $field = $table."_".$sc;
-		  if (grep { /$field/ } @columns) { $titoptions  .= qq|<option value="|.$table.qq|_$sc">$sc</option>\n|; }
+		  if (grep { /$sc/ } @columns) { $titoptions  .= qq|<option value="|.$table.qq|_$sc">$sc</option>\n|; }
 	}
 
 	my $hidden_input = qq|
@@ -1600,9 +1581,7 @@ sub format_record {
 
 	&make_author(\$view_text,$table,$id_number,$filldata);							# Author
 
-	&make_hits(\$view_text,$table,$id_number,$filldata);								# Hits
-
-	&make_status_buttons(\$view_text,$table,$id_number,$filldata);							# Buttons
+	&make_hits($text_ptr,$table,$id,$filldata);								# Hits
 
 
 	if ($record_format =~ /opml/) { $view_text =~ s/&/&amp;/g; }
@@ -1635,8 +1614,6 @@ sub format_record {
 			}
 
 	}
-
-
 
 
 
@@ -1737,14 +1714,11 @@ sub clean_up {		# Misc. clean-up for print
 	$$text_ptr =~ s/BEGDE(.*?)ENDDE//mig;				# Kill unfilled data elements
 	$$text_ptr =~ s/\[<a(.*?)href=""(.*?)>(.*?)<\/a>\]//mig;			# Kill blank Nav
 	$$text_ptr =~ s/<a(.*?)href=""(.*?)>(.*?)<\/a>/$1 $2 $3/mig;			# Kill blank URLs
-	$$text_ptr =~ s/<img(.*?)src=""(.*?)>//mig;			# Kill blank img
 
-	unless ($format eq "edit" || $format =~ /rss|json/i) {
-	  $$text_ptr =~ s/&quot;/"/mig;					# Replace quotes
-	  $$text_ptr =~ s/&amp;/&/mig;					# Replace amps
-	  $$text_ptr =~ s/&lt;/</mig;					# Replace amps
-	  $$text_ptr =~ s/&gt;/>/mig;					# Replace amps
-  }
+	$$text_ptr =~ s/<img(.*?)src=""(.*?)>//mig;			# Kill blank img
+	$$text_ptr =~ s/1 Replies/1 Reply/mig;				# Depluralize replies
+	$$text_ptr =~ s/0 Reply/0 Replies/mig;
+	$$text_ptr =~ s/&quot;/"/mig;					# Replace quotes
 
 	$$text_ptr =~ s/&amp;#(.*?);/&#$1;/mig;				# Fix broken special chars
 	$$text_ptr =~ s/&#147;/"/mig;
@@ -2095,7 +2069,6 @@ sub make_site_hits_info {
 sub make_hits {
 
 	my ($text_ptr,$table,$id,$filldata) = @_;
-
 	return unless (defined $table eq "post");			# Hits only for posts
 	return unless (defined $text_ptr);
 
@@ -2113,55 +2086,6 @@ sub make_hits {
 		my $total = $filldata->{$table."_total"};
 
 		$$text_ptr =~ s/<hits>/$hits\/$total/;
-	}
-
-
-}
-
-# -------  Make Buttons -------------------------------------------------------------
-#
-#  Fill values for today and total number of hits recorded by the hit counter
-#  Replaces <hits> command
-sub make_status_buttons {
-
-	my ($text_ptr,$table,$id,$filldata) = @_;
-
-	return unless (defined $text_ptr);
-
-	my $count=0;
-	# Values correspond to names from font-awesome
-	# At some future point this could be input from a db
-	my $icons = {
-			read => [ 'far fa-eye-slash', 'fa fa-eye', ],
-  		star => [ 'far fa-star', 'fas fa-star'],
-	};
-
-	while ($$text_ptr =~ /<statusbutton (.*?)>/sig) {
-		my $autotext = $1;
-
-		my $replace = "";
-		$count++; last if ($count > 100);			# Prevent infinite loop
-    unless ($filldata->{$table."_".$autotext}) { $filldata->{$table."_".$autotext} = 0; }
-
-    my $i = $icons->{$autotext}->[$filldata->{$table."_".$autotext}];
-    next unless $i;
-
-    $replace = qq|
-    <script>
-       var url = "|.$Site->{st_cgi}.qq|api.cgi";
-       jQuery("#$autotext$id").click(function() {
-       		var stat = ["$icons->{$autotext}->[0]","$icons->{$autotext}->[1]"];
-       		var cla = jQuery(this).find("i").attr("class");
-			 		if (cla == stat[0]) { jQuery(this).find("i").removeClass(stat[0]).addClass(stat[1]); cla=1;}
-			 		else if (cla == stat[1])  { jQuery(this).find("i").removeClass(stat[1]).addClass(stat[0]); cla=0; }
-          else { jQuery(this).find("i").addClass(stat[0]); cla=0; }
-          var col_name = "$table"+"_"+"$autotext";
-          parent.submit_function(url,'$table','$id',col_name,cla,"text");
-       });
-    </script>
-    <span id='|.$table.qq|_$autotext'><button id="$autotext$id" style="height:2em;"><i class="$i"></i></button>
-          <span id='|.$table.qq|_|.$autotext.qq|_result'></span></span>|;
-		$$text_ptr =~ s/<statusbutton $autotext>/$replace/;
 	}
 
 
@@ -3996,7 +3920,7 @@ sub main_window {
 	my $window = gRSShopper::Window->new({
 		tabs => $tabs,
 		table=>$table,            				# Table being displayed in the window
-		id => $id_number,			  		  		# ID of record being displayed in the window
+		id => $id_number,			  		  		# ID of record being displayed in the woindow
     starting_tab => $starting_tab,		# Tab to display when window is opened
 		reader_hidden=>0,    							# Controls whether we're displaying the reader tab or not
 		db=>$db,                  				# Pointer to database functions
@@ -4027,7 +3951,7 @@ sub main_window {
 	# Initialize Tab Contents
 	my $form_tabs_content = qq|
 		<!-- Main Content Tab Contents -->
-		<div class="tab-content" id="myTabContent" style="height:100%;">|;
+		<div class="tab-content" id="myTabContent">|;
 
 	# For each tab, defined as a string in @tabs
 	foreach my $tab (@$tabs) {
@@ -4077,8 +4001,8 @@ sub main_window {
 			# Place the content into the content div
 			$form_tabs_content .= qq|
 			<!-- $tab -->
-			<div class="tab-pane fade $window->{show_active}" id="$tab_div" role="tabpanel" aria-labelledby="$tab_div-tab"  style="height:100%;">
-				<div style="height:100%;">$tab_content</div>
+			<div class="tab-pane fade $window->{show_active}" id="$tab_div" role="tabpanel" aria-labelledby="$tab_div-tab">
+				<div>$tab_content</div>
 			</div>|;
 
 	}
@@ -4318,13 +4242,11 @@ return  $output;
 sub Tab_Reader {
 
   my ($window,$table,$id_number,$record,$data,$defined) = @_;
-  my $output = qq|<iframe id="viewer" style="border:0;width:100%;height:95%;"></iframe>
-   <script>
-   \$('#viewer').attr('src','|.$Site->{st_cgi}.qq|page.cgi?action=viewer&table='+readerTable+'&index='+readerIndex);
-   </script>
-  |;
-
-  return $output;
+  my $output = "";
+  foreach my $field (@{$window->{tab_list}->{Reader}}) {
+	  $output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
+  }
+  return  "Reader";
 
 }
 
@@ -5245,7 +5167,7 @@ sub form_textinput {
 		<div id="|.$col.qq|_div" class="thing nonspinner">
 		$fieldlable
 		<input type="text" placeholder="$placeholder" id="|.$col.qq|" value="$value" style="width:|.$size.qq|em;max-width:100%;">$advice
-		</div><div id="|.$col.qq|_result"></div>
+		</div>
 		<script>
 			\$('#|.$col.qq|').on('change',function(){
 				  var content = \$('#|.$col.qq|').val();
@@ -7802,10 +7724,9 @@ sub db_update {
         }
 
 	$sql .= join ', ', @sqlf;
-  $sql .= " WHERE ".$table."_id = '".$where."'";
-
-#  print "\n$sql <br>\n";
-#  foreach $l (@sqlv) { print "\n$l ; \n"; }
+	$sql .= " WHERE ".$table."_id = '".$where."'";
+  #print "$sql <br>";
+  #foreach $l (@sqlv) { print "$l ; "; }
 	my $sth = $dbh->prepare($sql);
 
 	if ($diag eq "on") { print "$sql <br/>\n @sqlv <br/>\n"; }
@@ -9795,7 +9716,7 @@ sub show_status_message {
 sub send_email {
 
 
-return;
+
 
 	my ($to,$from,$subj,$page) = @_;
 
@@ -10175,8 +10096,8 @@ sub record_sanitize_input {
 		# If it's not from a JS editor, auto-insert spaces
 		unless ($vars->{$vkey} =~ /^<p>/i) {
 			$vars->{$vkey} =~ s/\r//g;
-	#		$vars->{$vkey} =~ s/\n/\n\n/g;   # Adds an extra LF for single returns - converts MS Doc paras to extra LFs
-	#		$vars->{$vkey} =~ s/\n\n\n/\n\n/g; $vars->{$vkey} =~ s/\n/<br\/>/g;
+			$vars->{$vkey} =~ s/\n/\n\n/g;   # Adds an extra LF for single returns - converts MS Doc paras to extra LFs
+			$vars->{$vkey} =~ s/\n\n\n/\n\n/g; $vars->{$vkey} =~ s/\n/<br\/>/g;
 		}
 	}
 
@@ -10353,7 +10274,7 @@ sub record_delete {
 	$vars->{title} = &printlang("Table id deleted",&printlang($table),$id,$readername);
 
 	return if ($mode eq "silent");
-	#&send_notifications($dbh,$vars,$table,$vars->{title},$vars->{msg});
+	&send_notifications($dbh,$vars,$table,$vars->{title},$vars->{msg});
 
 }
 
@@ -10691,14 +10612,12 @@ sub record_notifications {
 			$emailcontent =~ s/<SUBSCRIBEE>/$e/g;
 			$eml .= $e." <br/>\n";
 			last if ($e eq "none");
-			#&send_email($e,$adr,$ttitle,$emailcontent,"htm");
+			&send_email($e,$adr,$ttitle,$emailcontent,"htm");
 		}
 	}
 }
 
 #               THIRD PARTY INTEGRATION
-#
-#    Longer term I'd like to standardize these functions
 
 
 
@@ -10878,18 +10797,18 @@ sub facebook_access_code_submit {
 sub mastodon_post {
 
     my ($dbh,$table,$id,$tweet) = @_;
-
+    
     # Check and make sure it can be and hasn't been posted
-
+    
     return "Content information not defined" unless ($table && $id);
     return "Mastodon turned off."  unless ($Site->{mas_post} eq "yes");
     return "Already posted this $table to Mastodon." if ($record->{$table."_social_media"} =~ "mastodon");
-    return "Mastodon requires a client ID, client secret and access token" unless
+    return "Mastodon requires a client ID, client secret and access token" unless 
        ($Site->{mas_instance} && $Site->{mas_cli_id} && $Site->{mas_cli_secret} && $Site->{mas_acc_token});
 
-
-    $tweet = &compose_microcontent($dbh,$table,$id,$tweet,500);
-
+	
+    $tweet = &compose_microcontent($dbh,$table,$id,$tweet,500);	
+	
     use Mastodon::Client;
 
     my $client = Mastodon::Client->new(
@@ -10907,76 +10826,7 @@ sub mastodon_post {
 
 }
 
-sub mastodon_harvest {
 
-	my ($channel) = @_;
-
-	  # Turn on Mastodon Listener
-	  # Streaming interface might change!
-	#  use Mastodon::Client or print "Whga??";
-
-  return unless ($channel->{channel_tag});      # Harvest ONLY if there is a tag
-  my $tag = "#".$channel->{channel_tag}; $tag =~ s/##/#/;
-
-	use Mastodon::Client;
-
-	my $client = Mastodon::Client->new(
-	  instance        => $Site->{mas_instance},
-	  name            => 'gRSShopper',
-	  client_id       => $Site->{mas_cli_id},
-	  client_secret   => $Site->{mas_cli_secret},
-	  access_token    => $Site->{mas_acc_token},
-	  coerce_entities => 1,
-	);
-
-#my $timeline = $client->timeline($tag) or return "Mastodon harvest error.";
-
-#return "tt<p>";
-
-  my $timeline = $client->timeline("public");
-#return "Mastodon $tag $timeline <p>";
-  foreach my $t (@$timeline) {
-#return "Found one: $t <br>";
-  #  print $t,"<br>";
-
-				my $content = get($t->{uri});
-				#print qq|<div style="width:100px;">$content</div>|;
-
-        $content =~ /<meta content="(.*?)" property="og:description/;
-        my $description = $1;
-				next unless ($description =~ /$tag/);
-				$content =~ /<meta content="(.*?)" property="og:title/;
-        my $mastotitle = $1;
-
-				my $chat; my $userstr = "";
-
-				my ($created,$garbage) = split / \+/,$status->{created_at};
-				$description =~ s/\x{201c}/ /g;	# "
-				$description =~ s/\x{201d}/ /g;	# "
-				$chat->{chat_link} = $t->{uri};
-				$chat->{chat_title} = "Chat title";
-
-        $chat->{chat_description} = qq|
-					<img src="" align="left" hspace="10">
-					<a href="$chat->{chat_link}">\@|.$mastotitle.qq|</a>: |.
-					$description . "";
-				$chat->{chat_signature} = "Mastodon";
-				$chat->{chat_crdate} = time;
-				$chat->{chat_channel} = $channel->{channel_id};
-				$chat->{chat_creator} = $Person->{person_id};
-				$chat->{chat_crip} = $ENV{'REMOTE_ADDR'};
-
-				if (my $cid = &db_locate($dbh,"chat",{chat_link => $chat->{chat_link}})) {
-					# Nothing
-				} else {
-					my $id_number = &db_insert($dbh,$query,"chat",$chat);
-				}
-
-   }
-
-
-
-}
 
 # -------   Twitter --------------------------------------------------
 #
@@ -11013,9 +10863,9 @@ sub twitter_post {
 
 	&error($dbh,"","","Twitter posting requires values for consumer key, consumer secret, token and token secret")
 		unless ($Site->{tw_cckey} && $Site->{tw_csecret} && $Site->{tw_token} && $Site->{tw_tsecret});
-
-
-	$tweet = &compose_microcontent($dbh,$table,$id,$tweet,280);
+		
+		
+	$tweet = &compose_microcontent($dbh,$table,$id,$tweet,280);		
 
 	my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
 		consumer_key        => $Site->{tw_cckey},
@@ -11045,38 +10895,24 @@ sub compose_microcontent {
 
    my ($dbh,$table,$id,$tweet,$length) = @_;
 
-  $tweet  =~ s/<(.*?)>//g;
+
 	my $record = &db_get_record($dbh,$table,{$table."_id"=>$id});
 
 
 										# Create Array of Post Sentences
-	my $post_description; my @sentences;
-  if ($table eq "post") {
-		$post_description = $record->{$table."_description"};
-		$post_description =~ s/<(.*?)>//g;
-		@sentences = split /\. /,$post_description;
-  }
+	my $post_description = $record->{$table."_description"};
+	$post_description =~ s/<(.*?)>//g;
+	my @sentences = split /\. /,$post_description;
 
 
 										# Compose Title and URL
-  my $tw_url;
-  if ($table eq "chat") {      # Special URL for chat
-     $tw_url = "";
-	} else {
-     $tw_url = $Site->{st_url}.$table."/".$id;
-  }
-
-  # Tag
-  unless ($vars->{chat_tag}  =~ /#/) { $vars->{chat_tag} = "#".$vars->{chat_tag};}
-  if ($table eq "chat") { $tw_url = $vars->{chat_tag}." ".$tw_url; }
-	elsif ($Site->{tw_use_tag}) { $tw_url = $Site->{st_tag}." ".$tw_url; }
-
-
+	my $tw_url = $Site->{st_url}.$table."/".$id;
+	if ($Site->{tw_use_tag}) { $tw_url = $Site->{st_tag}." ".$tw_url; }
 	my $url_length = length($tw_url)+1;
-	if ($table eq "post") { $tweet ||= $record->{$table."_title"}; }     # Place title for post
+	$tweet ||= $record->{$table."_title"};
 	$tweet =~ s/&#39;/'/g;
 	$tweet =~ s/&#38;/'/g;
-	$tweet =~ s/&quot;/"/g;
+	$tweet =~ s/&quot;/"/g;	
 	my $tweet_length = length($tweet);
 
 										# Create Initial Tweet (Abbreviating title if necessaey)
@@ -11164,7 +11000,7 @@ sub bbb_create_meeting {
 	my ($name,$id
 
 
-
+	
 	) = @_;
   #print "Content-type: text/html\n\n";
   #print "Smod password $Site->{bbb_mp} <p>";
@@ -11448,7 +11284,6 @@ package gRSShopper::Site;
  	$self->__load_languages();
 
 
-
  	return $self;
   }
 
@@ -11518,13 +11353,9 @@ package gRSShopper::Site;
 	# Open the multisite configuration file,
 	# Initialize if file can't be found or opened
 
-
   	my $data_file = $self->{data_dir} . "multisite.txt";
-
 		unless (-e $data_file) { $data_file = $ARGV[2]; }    # try a backup option (nneded for cron)
-
-	  open IN,"$data_file" or die qq|Cannot find $data_file to define website parameters. $?
-		  Args: 0 $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3]|;
+	  open IN,"$data_file" or die "Cannot find $data_file to define website parameters.";
 
 		#$self->__initialize("file");  # -------------------------------------------------------------> Initialize file
 
@@ -11931,50 +11762,7 @@ sub db_insert {		# Inserts record into table from hash
 	$sth->finish(  );
 	return $insertid;
 }
-# -------  Update---------------------------------------------------------
-# Updates record $where (must be ID) in table from hash
-# Adapted from SQL::Abstract by Nathan Wiger
-# -------  Update---------------------------------------------------------
-# Updates record $where (must be ID) in table from hash
-# Adapted from SQL::Abstract by Nathan Wiger
-sub db_update {
 
-	my ($self,$table,$input,$where,$msg) = @_;
-	my $dbh = $self->{dbh};
-	#print "Content-type: text/html\n\n";
-	unless ($dbh) { die "Error $msg Database handler not initiated"; }
-	unless ($table) { die "Error $msg Table not specified on update"; }
-	unless ($input) { die "Error $msg No data provided on update"; }
-	unless ($where) { die "Error $msg Record ID not specified on update"; }
-
-	die "Unsupported data type specified to update" unless (ref $input eq 'HASH' || ref $input eq 'Link' || ref $input eq 'Feed' || ref $input eq 'gRSShopper::Record' || ref $input eq 'gRSShopper::Feed');
-	#print "Updating $table $input $where <br>";
-	my $data = $self->db_prepare_input($table,$input);
-	#print "Data: $data <br>";
-	#return "No data" unless ($data);
-
-	my $sql = "UPDATE $table SET ";
-	my(@sqlf, @sqlv) = ();
-
-	for my $k (sort keys %$data) {
-		push @sqlf, "$k = ?";
-		push @sqlv, $data->{$k};
-
-				}
-
-	$sql .= join ', ', @sqlf;
-	$sql .= " WHERE ".$table."_id = '".$where."'";
-
-	#  print "$sql <br>";
-	#  foreach $l (@sqlv) { print "$l ; "; }
-	my $sth = $dbh->prepare($sql);
-
-	$sth->execute(@sqlv) or die "Update $sql failed: ".$sth->errstr;
-
-	return $where;
-
-
-}
 # -------   Locate -------------------------------------------------------------
 
 # Find the ID number given input values
@@ -12036,7 +11824,6 @@ sub db_prepare_input {	# Filters input hash to contain only columns in given tab
 
     # Not allowed to set primary key
 		next if ($ikeys =~ /_id$/i);
-		next if ($ikeys =~ /^id$/i);
 
 		# Skip if the table doesn't have that field defined
 		next unless (grep( /$ikeys/, @columns ));
@@ -12361,41 +12148,8 @@ package gRSShopper::Person;
 			}											# Actual values may override
 
 	    # Load record data from databases
-			if ($self->{id} && $self->{id} eq "new") { $self->{id} = $self->create();}
+			if ($self->{id} eq "new") { $self->{id} = $self->create();}
 			&load($self) if ($self->{load});
-
-			# If autopost is called...
-			if ($self->{data}->{autopost} && $self->{data}->{autopost} ne "" && $self->{data}->{autopost} ne "undefined") {
-
-				my ($autocommand,$autotable,$autoid) = split '-',$self->{data}->{autopost};
-
-				# Get the link being autoposted
-				my $autorecord = gRSShopper::Record->new(
-					table => $autotable,
-					id => $autoid,
-					db => $self->{db},
-					dbh => $self->{dbh},
-					person => $self->{person},
-					load => 1,
-				);
-
-				# Copy its values into the new record and save the record
-				if ($autocommand eq "post") {
-					$self->{$self->{table}."_title"} = $autorecord->{$autotable."_title"};
-					$self->{$self->{table}."_link"} = $autorecord->{$autotable."_link"};
-					$self->{$self->{table}."_description"} = $autorecord->{$autotable."_description"};
-					$self->{$self->{table}."_content"} = $autorecord->{$autotable."_content"};
-				}
-
-				$self->{db}->db_update($self->{table},$self,$self->{$self->{table}."_id"});
-
-
-				# Copy its graph to the new post as well
-				if ($self->{table} eq "post" && $autotable eq "link") { # only works for post and link for now
-					&clone_graph($self,$self->{db},$self->{dbh},$self->{person},$autoid,$self->{$self->{table}."_id"});
-				}
-
-      }
 
 	 		return $self;
 	  }
@@ -12477,62 +12231,8 @@ package gRSShopper::Person;
 	  }
 
 
-
-
-				# -------  Clone Graph  --------------------------------------------------------
-			#
-			#
-			#	      Edited: 21 January 2013
-		# This is a duplicate of the one in the main grsshopper scripts...
-		# eventually set up to require these functions by package
-			#
-			#----------------------------------------------------------------------
-			sub clone_graph {
-
-				my ($self,$db,$dbh,$Person,$linkid,$postid) = @_;
-
-			  my $now = time;
-			  my $cr = $Person->{person_id};
-
-
-				my $sql = qq|SELECT * FROM graph WHERE graph_tableone=? AND graph_idone = ?|;
-			  my $sth = $dbh->prepare($sql);
-			  $sth->execute("link",$linkid);
-
-				while (my $ref = $sth -> fetchrow_hashref()) {
-
-					$ref->{graph_tableone} = "post";
-					$ref->{graph_idone} = $postid;
-					$ref->{graph_crdate} = $now;
-					$ref->{graph_creator} = $cr;
-
-					$db->db_insert("graph",$ref);
-
-				}
-
-
-				my $sqlg = qq|SELECT * FROM graph WHERE graph_tabletwo=? AND graph_idtwo = ?|;
-				my $file_list = "";
-				my $sthg = $dbh->prepare($sqlg);
-				$sthg->execute("link",$linkid);
-				while (my $ref = $sthg -> fetchrow_hashref()) {
-
-					$ref->{graph_tabletwo} = "post";
-					$ref->{graph_idtwo} = $postid;
-					$ref->{graph_crdate} = $now;
-					$ref->{graph_creator} = $cr;
-
-					$db->db_insert("graph",$ref);
-				}
-
-		}
-
-
-
-
-
 	  #----------------------------- Flow Values ------------------------------
-	  #                    (might all be replaced by autopost)
+	  #
 	  #  Flow values from one type of record to another
 	  #  Eg., fill empty valies in a link with values from the feed
 	  #  Used to initialize record values
@@ -12694,7 +12394,6 @@ package gRSShopper::Person;
 	   		$self->{$ax} = $ay;
       }
 
-
       # get a record to display
 			if  ($self->{table}) {
 				# Import Record Data
@@ -12709,7 +12408,10 @@ package gRSShopper::Person;
 				);
 	  	}
 
+
       $self->get_tab_list($self->{table},$self->{dbh});
+
+
       return $self;
 
 
@@ -12831,6 +12533,23 @@ package gRSShopper::Person;
 			return @fieldlist;
 
 		}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,5 +1,9 @@
 var url = 'https://www.downes.ca/cgi-bin/api.cgi';
 
+// Stores current status of the Reader
+var readerTable;
+var readerIndex;
+
 //
 //  Initialize Content Windows
 //
@@ -23,12 +27,12 @@ function startUp(url) {
 //  Load content into a div and show the div
 //
 
-function openDiv(url,div,app,db,id,title,starting_tab) {
-//alert(app+","+db+","+id+","+title+","+starting_tab);
+function openDiv(url,div,app,db,id,title,starting_tab,autopost) {
+//alert("Cmd: "+app+", Table: "+db+", ID: "+id+", Title: "+title+", Starting Tab: "+starting_tab+"Autopost: "+autopost);
     // Assign a URL to main add an "active" class to the button that opened the tab
 
-    if (title) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id+"&title="+title; }
-    else if (id) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id; }
+    if (title) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id+"&title="+title+"&autopost="+autopost; }
+    else if (id) { url = url + "?cmd="+app+"&app="+app+"&db="+db+"&id="+id+"&autopost="+autopost; }
     else { url = url + "?cmd="+app+"&app="+app+"&db="+db; }
 
     var openme = 'main';
@@ -328,17 +332,21 @@ function api_submit(url,div,cmd,obj,table,id,col,content) {
 
 
 function submit_function(url,table,id,col_name,content,type) {
+//alert("Called"+table+id+col_name+content+type);
         $('#'+col_name+"_div").addClass('spinner');
         $.ajax({
             url: url,
-            data: {type:type,table_id:id,table_name:table,updated:1,value:content,col_name:col_name,type:type},
+            data: {cmd:'update',type:type,table_id:id,table_name:table,updated:1,value:content,col_name:col_name,type:type},
             error: function(value) {
                 $('#'+col_name+'_result').html("<div class=\"error\">An error has occurred</div>");
-                $('#'+col_name+'_result').show(); },
+                $('#'+col_name+'_result').show();
+              },
+
             success: function(value) {
+                $('#'+col_name+'_result').hide();
                 $('#'+col_name+'_result').html("<div class=\"success\">"+value+"</div>");
                 $('#'+col_name+'_liveupdate').html(value);
-                $('#'+col_name+'_result').show();
+                $('#'+col_name+'_result').show(); 
                 var previewUrl= url+"?cmd=show&table="+table+"&id="+id+"&format=summary";
                 $('#Preview').load(previewUrl);
                 $('.empty-after').val("");

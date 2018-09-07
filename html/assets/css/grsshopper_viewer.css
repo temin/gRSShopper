@@ -1,8 +1,10 @@
 /*  Site-Wide CSS  */
 
+
+
 html,
 body {
-    height: 95vh;
+    height: 100%;
 }
 
 
@@ -19,10 +21,31 @@ a {color:#a85038; }
 .email_head {background:#ffffff;margin-bottom:1%;padding:2%;border: 1px solid #f0f0f0}
 .email_byline { font: 400 12pt/16pt Verdana,Arial, sans-serif;color:#000040;line-height:120%;}
 
+.viewer-select {
 
+  position: relative;
+  font-family: Arial;
+  height: 2em;
+  color:#a85038;
 
+}
 
+.viewer-submit {
 
+  font-family: Arial;
+  height: 2.2em;
+
+}
+
+button {
+background:white;
+
+}
+
+input {
+background:white;
+
+}
 
 /* Generic Navigation Link used all over the place */
 

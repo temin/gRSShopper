@@ -23,7 +23,7 @@
 #
 #-------------------------------------------------------------------------------
 
-
+# print "Content-type: text/html\n\n";
 
 # Forbid bots
 
@@ -40,11 +40,27 @@
 	require $dirname . "/grsshopper.pl";
 	use JSON;
 
+
+
 # Load modules
 
 	our ($query,$vars) = &load_modules("api");
   $vars->{db} ||= $vars->{table};
 	$vars->{table} ||= $vars->{db};
+
+# Get Post Data
+  our $request_data;
+	my $postdata = $query->param('POSTDATA');
+	if ($postdata) {
+	    print "Found postdata<br>";
+			# Parse the JSON Data
+			use JSON::Parse 'parse_json';
+			use JSON;
+			$request_data = parse_json($postdata);
+			print "Content-type: text/html\n\n";
+			print "ok";
+			exit;
+	}
 
 # Load Site
 
@@ -75,35 +91,35 @@
 	}
 
 	# SUBSCRIBE FORM
-	if ($vars->{cmd} eq "subform") {
+	elsif ($vars->{cmd} eq "subform") {
 		print "Content-type: text/html\n\n";
 		 print &api_subscription_form();
 		 exit;
 	}
 
   # SUBSCRIBE
-	if ($vars->{cmd} eq "subscribe") {
+	elsif ($vars->{cmd} eq "subscribe") {
 		print "Content-type: text/html\n\n";
 		 print &api_subscribe();
 		 exit;
 	}
 
 	# UNSUBSCRIBE FORM
-	if ($vars->{cmd} eq "unsubform") {
+	elsif ($vars->{cmd} eq "unsubform") {
 		print "Content-type: text/html\n\n";
 		 print &api_unsubscribe_form();
 		 exit;
 	}
 
 	# UNSUBSCRIBE
-	if ($vars->{cmd} eq "unsubscribe") {
+	elsif ($vars->{cmd} eq "unsubscribe") {
 		print "Content-type: text/html\n\n";
 		 print &api_unsubscribe();
 		 exit;
 	}
 
 	# CONFIRM
-	if ($vars->{cmd} eq "confirm") {
+	elsif ($vars->{cmd} eq "confirm") {
 		print "Content-type: text/html\n\n";
 		 print &api_confirm();
 		 exit;
@@ -121,12 +137,12 @@
   }
 
   # READER
-	elsif ($vars->{cmd} eq "show" && $vars->{title} eq "Reader") {
+	elsif ($vars->{cmd} eq "reader") {
 
-		print "Content-type: text/html\n\n";
-			print "SHOW";
-			while (my($vx,$vy) = each %$vars) { print "$vx = $vy <br>"; }
-		print &api_show_record(); exit;
+    my $table = $vars->{table} ||= "post";
+    print "Content-type: text/html\n\n";
+    print qq|<iframe src="|.$Site->{st_cgi}.qq|viewer.cgi?action=viewer&table=$table" style="border:0;width:100%;height:100vh;display: block;" height="100%"></iframe>|;
+		exit;
 	}
 
 
@@ -168,42 +184,6 @@
 # get Postdata, in which API JSON will be stored
 
 
-  my $postdata = $query->param('POSTDATA');
-  if ($postdata) {
-    print "Found postdata<br>";
-		# Parse the JSON Data
-		use JSON::Parse 'parse_json';
-		use JSON;
-		my $request_data = parse_json($postdata);
-
-		if ($request_data->{action} eq "search") {
-
-
-			# Table
-			unless ($request_data->{table}) { print "Error: table name must be provided."; exit; }
-			$request_data->{table} =~ s/[^a-zA-Z0-9 _]//g;  # Just make sure there's no funny business
-
-			my $sql = &create_sql($request_data->{table},$request_data->{language},$request_data->{sort},$request_data->{page});
-			my $query = '%'.$request_data->{query}.'%';
-
-			# Execute query and convert the result to JSON, then print
-			my $json->{entries} = $dbh->selectall_arrayref( $sql, {Slice => {} },$query,$query );
-			my $json_text = to_json($json);
-			print $json_text;
-      exit;
-
-    }
-
-
-
-			while (my($x,$y) = each %$request_data) { print "$x = $y <p>";}  											#{%}
-
-
-
-		print "Content-type: text/html\n\n";
-		print "ok";
-		exit;
-	}
 
 
 # -------------------------------------------------------------------------------------
@@ -224,6 +204,8 @@ if ($vars->{cmd}) {
 	# LIST
 
 	if ($vars->{cmd} eq "list") {
+
+  #  print "Content-type: text/html\n\n";
 
     # List Tables
 		if ($vars->{obj} eq "tables") { print &list_tables(); exit; }  # Temporary
@@ -508,6 +490,93 @@ if ($vars->{cmd}) {
 		print encode_json( $response );
 
     exit;
+
+  # UPDATE
+	} elsif ($vars->{updated} || $vars->{cmd} eq "update") {
+
+
+		# Restrict to Admin
+
+			&admin_only();
+
+
+		# Verify Data
+
+		die "Table name not provided" unless ($vars->{table_name});
+		die "Table ID not provided" unless ($vars->{table_id});
+		die "Column name not provided" unless ($vars->{col_name});
+		#die "Input value not provided" unless ($vars->{value});
+		die "Input type not provided" unless ($vars->{type});
+	 # &record_sanitize_input($vars);
+
+		if ($vars->{type} eq "text" || $vars->{type} eq "textarea"  || $vars->{type} eq "wysihtml5" || $vars->{type} eq "select") {
+       &api_textfield_update(); }
+
+		elsif ($vars->{type} eq "keylist") { &api_keylist_update();  }
+
+
+		elsif ($vars->{type} eq "remove") { &api_keylist_remove(); }
+
+	  # record publish
+		elsif ($vars->{type} eq "data") { &api_data_update();  }
+
+	  # file upload
+		elsif ($vars->{type} eq "file") { &api_file_upload(); }
+
+	  # url upload
+		elsif ($vars->{type} eq "file_url") { &api_url_upload(); }
+
+	  # record publish
+		elsif ($vars->{type} eq "publish") { &api_publish(); }
+
+	  # column create
+		elsif ($vars->{type} eq "column") { &api_column_create(); }
+
+	  # column update
+		elsif ($vars->{type} eq "alter") { &api_column_alter(); }
+
+	  # column remove
+		elsif ($vars->{type} eq "column_remove") { &api_column_remove(); }
+
+		elsif ($vars->{type} eq "commit") { &api_commit(); }
+
+
+			if ($request_data->{action} eq "search") {
+
+
+				# Table
+				unless ($request_data->{table}) { print "Error: table name must be provided."; exit; }
+				$request_data->{table} =~ s/[^a-zA-Z0-9 _]//g;  # Just make sure there's no funny business
+
+				my $sql = &create_sql($request_data->{table},$request_data->{language},$request_data->{sort},$request_data->{page});
+				my $query = '%'.$request_data->{query}.'%';
+
+				# Execute query and convert the result to JSON, then print
+				my $json->{entries} = $dbh->selectall_arrayref( $sql, {Slice => {} },$query,$query );
+				my $json_text = to_json($json);
+				print $json_text;
+	      exit;
+
+	    }
+
+
+	    # Identify, Save and Associate File
+
+	  #	my $file;
+	  #	if ($query->param("file_name")) { $file = &upload_file($query); }		# Uploaded File
+	  #	elsif ($vars->{file_url}) { $file = &upload_url($vars->{file_url}); }		# File from URL
+
+
+
+	  #my $return = &form_graph_list("post","60231","author");
+
+		# &send_email('stephen@downes.ca','stephen@downes.ca', 'api failed', 	qq|Table ID  - |.$vars->{table_id}.qq|	Column  - |.$vars->{col_name}.qq|	Input value  - |.$vars->{value}.qq|	Input type  - |.$vars->{type}.qq|$return|);
+
+
+		#print $return;
+
+		exit;
+
 
 	}
 
@@ -1238,11 +1307,24 @@ sub api_keylist_remove {
 sub api_textfield_update {
 
 
-
-
 	die "Field does not exist" unless (&__check_field($vars->{table_name},$vars->{col_name}));
+	# Check for duplicates
+	if ($vars->{col_name} =~ /_title|_name|_url|_link/) {
+		if (my $l = &db_locate($dbh,$vars->{table_name},{$vars->{col_name} => $vars->{value}})) {
+			$vars->{msg} .= qq|<p>Duplicate Entry. This $vars->{col_name} will not be saved.<br/>
+			If you would like to edit the existing $vars->{table_name} then please
+			<span title="Edit" onclick="openDiv('$Site->{st_cgi}api.cgi','main','edit','$vars->{table_name}','$l','Edit');"> <i class="fa fa-edit"> Click Here</i></span></p>|;
+			print $vars->{msg};
+			exit;
+		}
+
+	}
 	my $id_number = &db_update($dbh,$vars->{table_name}, {$vars->{col_name} => $vars->{value}}, $vars->{table_id});
-	if ($id_number) { &api_ok();   } else { &api_error(); }
+	# Update the cached version of the record
+	if ($id_number) {
+ 		&output_record($dbh,$query,$vars->{table_name},$vars->{table_id},"viewer");
+		&api_ok();
+  } else { &api_error(); }
 	die "api failed to update $vars->{table_name}  $vars->{table_id}" unless ($id_number);
 
 
@@ -1873,7 +1955,7 @@ sub api_autopost {
 
 
 
-if ($vars->{updated}) {
+if ($vars->{updated} || $vars->{cmd} eq "update") {
 
 
 	# Restrict to Admin
@@ -1888,7 +1970,7 @@ if ($vars->{updated}) {
 	die "Column name not provided" unless ($vars->{col_name});
 	die "Input value not provided" unless ($vars->{value});
 	die "Input type not provided" unless ($vars->{type});
-
+  &record_sanitize_input($vars);
 
 	if ($vars->{type} eq "text" || $vars->{type} eq "textarea"  || $vars->{type} eq "wysihtml5" || $vars->{type} eq "select") {  &api_textfield_update(); }
 
@@ -2086,5 +2168,6 @@ if ($vars->{updated}) {
 }
 
 # Print OK for blank api request
+print "Content-type: text/html\n\n";
 print "OK";
 exit;

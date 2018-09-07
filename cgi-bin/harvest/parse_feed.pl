@@ -15,7 +15,8 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-require $Site->{st_cgif}."harvest/tags.pl";
+my $dirname = dirname(__FILE__);
+require $dirname."/tags.pl";
 
 sub parse_feed {
 
@@ -268,7 +269,8 @@ sub element_close {
 
 		if (($parent->{link_link} =~ m|youtube\.com|) && ($feedrecord->{feed_section} eq "podcast")) {
 			&diag(6,"This is a podcast! Creating audio out of the video: $child->{link_link}");
-      require $Site->{st_cgif}."harvest_youtube.pl";
+	    my $dirname = dirname(__FILE__);
+      require $dirname."/harvest_youtube.pl";
 			my ($purl,$plength) = &youtube_to_podcast($parent->{link_link});
 			if ($purl) {
 				if ($purl =~ /^Error/) {
