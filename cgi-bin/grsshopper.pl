@@ -1236,7 +1236,7 @@ sub list_records {
 
 		&autodates(\$record_text);
 		&autotimezones($query,\$record_text); 	# Fill timezone dates
-
+   	&make_tz($dbh,\$record_text);								# Time zones
 
     # Print raw list if there's no list format
 		unless ($record_text) {
@@ -1435,7 +1435,7 @@ sub format_content {
 	$wp->{page_content} =~ s/#TODAY#/$today/;
 
 	&autodates(\$wp->{page_content});
-
+	&make_tz($dbh,\$wp->{page_content});								# Time zones
 
         &get_loggedin_image(\$wp->{page_content});
 
@@ -1497,18 +1497,28 @@ sub get_loggedin_image{
 }
 sub published_on_web {
 
-	# Do not publish if record is not 'published' (ie., if $Site->{pubstatus} has a value, then fill only if the value of $table_social_media !~ /web/
+	# Do not publish if record is not 'published' (ie., if $Site->{pubstatus} has a value,
+  # then fill only if the value of $table_social_media !~ /web/
 	# Triggered by creating a 'social_media' column in the table (which we test for here)
 
 	my ($dbh,$table,$record_data,@pubcolumns) = @_;
 
-	if ($Site->{pubstatus}) {
-		my $smcolumn = $table."_social_media";
+		# Yes, it's published
+		if ($record_data->{$table."_web"}) { return 1; }
+
+	  if ($Site->{pubstatus}) {
+
+		# Old style
+		# Get the list of columns for the table
 		unless (@pubcolumns) { @pubcolumns = &db_columns($dbh,$table); }
+		my $smcolumn = $table."_social_media";
+
 			if ( grep( /^$smcolumn$/, @pubcolumns ) ) {
+
 			return 0 unless ($record_data->{$table."_social_media"} =~ /web/i);
 		}
 	}
+
 	return 1;
 
 }
@@ -1591,7 +1601,7 @@ sub format_record {
 	&make_next($dbh,\$view_text,$table,$id_number,$filldata);							# Prev / Next Link
 
 	&autodates(\$view_text);										# Dates
-
+	&make_tz($dbh,\$view_text);								# Time zones
 
 
 	&make_images(\$view_text,$table,$id_number,$filldata);							# Images
@@ -2275,6 +2285,13 @@ sub make_escape {
 		$newinput .= $escarea.$nonescarea;
 	}
 	$$input = $newinput;
+}
+sub make_tz {
+
+	my ($dbh,$input,$silent) = @_;
+	return unless $$input =~ /<timezone>/;
+	my $newinput = $Site->{st_timezone};
+	$$input =~ s/<timezone>/$newinput/ig;
 }
 
 	# -------   Make Keylist ------------------------------------------------------
@@ -4017,6 +4034,11 @@ sub main_window {
 		$window->{reader_hidden} = 1;
   }
 
+	# Make sure we have a Help tab if help is available
+	# Location of help contents is defined in the 'Form' record for that table, in form_help
+	unless (grep(/^Help/i, @$tabs)) {
+		if ($window->{help}) { push @$tabs,"Help"; }
+  }
 
 	# Initialize Tabs
 	my $form_tabs_tabs = qq|
@@ -4118,8 +4140,8 @@ sub admin_frame {
 		return unless (&is_viewable("admin","general")); 		# Permissions
 
 		$title ||= "Admin Title"; $content ||= "Admin Content";
-	#	print "Content-type: text/html; charset=utf-8\n\n";
-   print "Content-type: text/html\n\n";
+		print "Content-type: text/html; charset=utf-8\n\n";
+  # print "Content-type: text/html\n\n";
 		print qq|
 	<!DOCTYPE html>
 	<html lang="en">
@@ -4240,7 +4262,6 @@ sub Tab_Right_Sidebar {
 sub Tab_Edit {
 
 	my ($window,$table,$id_number,$record,$data,$defined) = @_;
-	my ($window) = @_;
 
 	my $output = "";
 	#print "Content-type: text/html\n\n";
@@ -4262,7 +4283,25 @@ sub Tab_Edit {
 	return  $output;
 
 }
+# TABS ----------------------------------------------------------
+# ------- Resources --------------------------------------------
+#
+# Generic Resource Functions - as boring as a tab gets
+#
+# -------------------------------------------------------------------------
+sub Tab_Resources {
 
+	my ($window,$table,$id_number,$record,$data,$defined) = @_;
+
+	my $output = "";
+	#print "Content-type: text/html\n\n";
+
+	foreach my $field (@{$window->{tab_list}->{Resources}}) {
+		$output .= &process_field_types($window,$table,$id_number,$field,$record,$data,$defined);
+	}
+	return  $output;
+
+}
 	# TABS ----------------------------------------------------------
 	# ------- Import --------------------------------------------
 	#
@@ -4318,6 +4357,48 @@ return  $output;
 sub Tab_Reader {
 
   my ($window,$table,$id_number,$record,$data,$defined) = @_;
+	return;  # Temporary
+  my $output = qq|<iframe id="viewer" style="border:0;width:100%;height:95%;"></iframe>
+   <script>
+   \$('#viewer').attr('src','|.$Site->{st_cgi}.qq|page.cgi?action=viewer&table='+readerTable+'&index='+readerIndex);
+   </script>
+  |;
+
+  return $output;
+
+}
+
+# TABS ----------------------------------------------------------
+# ------- Reader --------------------------------------------
+#
+# Generic Reader Function
+#
+#
+#
+# -------------------------------------------------------------------------
+sub Tab_Help {
+
+  my ($window,$table,$id_number,$record,$data,$defined) = @_;
+
+	my $help_page = $window->{help};
+	my $output = "";
+
+	# Try to find it locally
+	my $tableid = &db_locate($dbh,"page",{page_location=>$help_page});
+	if ($tableid) { $output = my $table_data = &db_get_single_value($dbh,"page","page_code",$tableid); }
+
+  # Get it from gRSShopper.ca
+	unless ($output) {
+		my $url = 'http://grsshopper.downes.ca/'.$help_page;
+		$output = get($url);
+	}
+
+	# Finish
+	unless ($output) { $output = "Help not found. To create help, create a page with the page location: $help_page "; }
+  return $output;
+
+
+	return;  # Temporary
   my $output = qq|<iframe id="viewer" style="border:0;width:100%;height:95%;"></iframe>
    <script>
    \$('#viewer').attr('src','|.$Site->{st_cgi}.qq|page.cgi?action=viewer&table='+readerTable+'&index='+readerIndex);
@@ -5964,6 +6045,45 @@ sub form_date_time_select {
 	my ($table,$title) = split /_/,$col;
 	my $id = $record->{$table."_id"};
 	my $value = $record->{$col} || "";
+	my $url = $Site->{st_cgi}."api.cgi";
+#$value=time;
+  # DateTime is stored as epoch, we need to convert to datetimepicker
+	unless ($value) { $value = time; }
+  my $dpvalue;
+  if ($value =~ /^\d+?$/) { $dpvalue = &epoch_to_datepicker($value,$Site->{st_timezone}); }
+  else { $dpvalue = &epoch_to_datepicker(time,$Site->{st_timezone}); }  # Failsafe
+  unless ($fieldlable) { $fieldlable = ucfirst($title); }
+   my $output = qq|
+
+	 <div id="|.$col.qq|_div" class="thing nonspinner">
+	 $fieldlable
+	 <input type="text" id="$col" value="$dpvalue" style="width:|.$size.qq|em;max-width:100%;">
+	 <span id="|.$col.qq|_result"></span>
+
+	 <script>
+   \$( document ).ready(function() {
+		 \$('#$col').datetimepicker({
+			 inline:false,
+			 onSelectDate: function(date, instance) {
+				 var url = "$url";
+				 var content = \$('#|.$col.qq|').val();
+				 submit_function(url,"$table","$id","$col",content,"datetime");
+				 var previewUrl = url+"?cmd=show&table=$table&id=$id&format=summary";
+				 \$('#Preview').load(previewUrl);
+			 },
+			 onSelectTime: function(date, instance) {
+				 var url = "$url";
+				 var content = \$('#|.$col.qq|').val();
+				 submit_function(url,"$table","$id","$col",content,"datetime");
+				 var previewUrl = url+"?cmd=show&table=$table&id=$id&format=summary";
+				 \$('#Preview').load(previewUrl);
+			 },
+		 });
+   });
+	 </script>
+	 		</div>|;
+
+return $output;
 
 
 	# Time Zone - default to site defined time zone
@@ -6157,7 +6277,7 @@ sub form_optlist {
 
 
 	if ($ajax) {
-	    return form_select($window,$table,$id,$col,$selected_value,$fieldsize,$advice,$options,$fieldlable);
+	    return &form_select($window,$table,$id,$col,$selected_value,$fieldsize,$advice,$options,$fieldlable);
 	} else {
 	    return qq|$option_lables|;
 	}
@@ -6188,7 +6308,7 @@ sub form_select {
 	      <div class="row form-group" style="margin-left:5px;"> <select id="$col" $multiple>$options</select></div>
 		 </div><div id="|.$col.qq|_result"></div>
 		 <script>
-
+       \$( document ).ready(function() {
 		    \$('#|.$col.qq|').togglebutton();
  		    \$('#|.$col.qq|').on('change', function(e) {
  	    		var newval = \$('#|.$col.qq|').val();
@@ -6198,6 +6318,7 @@ sub form_select {
 					var previewUrl = url+"?cmd=show&table=$table&id=$id&format=summary";
 					\$('#Preview').load("previewUrl");
   	    });
+       });
  	   </script>
 		 |;
 
@@ -7232,6 +7353,7 @@ sub get_template {
 	&make_keywords($dbh,$query,\$template);							# 	- Make Keywords
 
 	&autodates(\$template);										# 	- Autodates
+	&make_tz($dbh,\$template);								# Time zones
 
 														# More Formatting
 
@@ -8330,7 +8452,8 @@ sub save_graph {
 sub graph_add {
 
 	my ($tabone,$idone,$tabtwo,$idtwo,$type,$typeval) = @_;
-
+  my $crdate = time;
+  my $creator = $Person->{person_id} || $Site->{context};
 	# Return if it already exists
 	if ($eid = &db_locate($dbh,"graph",{
 		graph_tableone=>$tabone, graph_idone=>$idone,
@@ -8610,6 +8733,7 @@ sub autodates {
 		elsif ($format eq "tzdate") { $replace = &tz_date($time,"day",$tz); }
 		elsif ($format eq "datepicker") { $replace = &tz_date($time,"min",$tz); }
 		elsif ($format eq "iso") { $replace = &iso_date($time,"day",$tz); }
+		elsif ($format eq "ics") { $replace = &ics_date($time,$tz); }
 		elsif ($format eq "isoh") { $replace = &iso_date($time,"min",$tz); }
 		else { $replace = "Autodates error"; }
 
@@ -8641,6 +8765,8 @@ sub autodates {
 				$replace = &rfc822_date($otime);
 			} elsif ($date_type =~ /GMT_DATE/) {
 				$replace = &nice_date($otime,"GMT");
+			}	elsif ($date_type =~ /ICS_DATE/) {
+					$replace = &ics_date($otime,"GMT");
 			} elsif ($date_type =~ /MON/) {
 				$replace = &nice_date($otime,"month");
 			} elsif ($date_type =~ /NICE_DT/) {
@@ -8683,6 +8809,25 @@ sub iso_date {
 	if ($h eq "min") { return $year."-".$month."-".$day."T".$hour.":".$minute.":00"; }
 
 	return $dt->year."-".$dt->month."-".$dt->day;
+
+}
+# -------   ICS Date ---------------------------------------------------
+#
+# 		ICS format string string returns YYYYMMDDTHHMMSS
+#
+#	      Edited: 21 Sep 2018
+#-------------------------------------------------------------------------------
+sub ics_date {
+
+
+
+my ($time,$tz) = @_;
+
+my $dt = &set_dt($time,$tz);
+
+my ($year,$month,$day,$dow,$hour,$minute,$second) = &dt_to_array($dt);
+
+return $year.$month.$day."T".$hour.$minute."00";
 
 }
 
@@ -9019,7 +9164,7 @@ sub datepicker_to_epoch {
 sub epoch_to_datepicker {
 
 	# Get date from input
-	my ($time,$h,$tz) = @_;
+	my ($time,$tz) = @_;
 	my $dt = &set_dt($time,$tz);
 	my ($year,$month,$day,$dow,$hour,$minute,$second) = &dt_to_array($dt);
 
@@ -10010,6 +10155,30 @@ sub mime_type {
 	unless ($mimetype) { $mimetype = "unknown"; }
 
 	return $mimetype;
+
+}
+
+# Jusdt a quick and dirty read file
+
+sub read_text_file {
+
+   my ($file) = @_;
+	 open(FILE, $file) or return "Can't read file $file [$!]\n";
+	 $document = <FILE>;
+	 close (FILE);
+	 return $document;
+
+}
+
+# Just a quick and dirty save file
+
+sub write_text_file {
+
+   my ($file,$contents) = @_;
+	 open(FILE, ">$file") or return "Can't open file $file [$!]\n";
+	 print FILE $contents;
+	 close (FILE);
+	 return 1;
 
 }
 
@@ -12730,10 +12899,13 @@ package gRSShopper::Person;
 
 			if ($db->db_table_exist("form")) {
 
-				# Find the record for the current $table
+				# Find the form record for the current $table
 				my $tableid = $db->db_locate("form",{form_title=>$table});
 
 				if  ($tableid) {
+
+					# Get the form_help from the record and store it as a window value
+					$self->{help} = $db->db_get_single_value("form","form_help",$tableid);
 
 					# Get the 'data' from the record, and split it into fields
 					my $table_data = $db->db_get_single_value("form","form_data",$tableid);

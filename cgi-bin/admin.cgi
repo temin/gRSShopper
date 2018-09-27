@@ -530,6 +530,8 @@
 
 	        my $content = &printlang("General Information");
 
+		$content .= &admin_update_grsshopper($dbh,$query);
+
 		$content .= &admin_configtable($dbh,$query,"Site Information",
 			("Site Name:st_name","Site Tag:st_tag","Publisher:st_pub","Creator:st_crea","License:st_license","Time Zone:st_timezone","Reset Key:reset_key","Cron Key:cronkey"));
 
@@ -1697,9 +1699,57 @@
 	}
 
 
+# --------------------------------------   Update gRSShopper -----------------------------------------------
+#
+#    Option to calls a shell script that downloads most recent gRSShopper code from
+#    GitHub and installs it in cgi-bin
+#
+# ------------------------------------------------------------------------------------------------------
 
 
+sub admin_update_grsshopper{
 
+	my ($dbh,$query) = @_;
+
+	return unless (&is_viewable("admin","update")); 		# Permissions
+
+  my $update_string = "";
+
+  my $local_version = &read_text_file('version.txt');
+	my $remote_version = get("https://raw.githubusercontent.com/Downes/gRSShopper/master/version");
+
+  if ($local_version eq  $remote_version) {
+    $update_string = "gRSShopper is up to date at version $local_version."
+	} else {
+		$update_string = qq|<p>Local version is $update_string and master version is $remote_version</p>
+			<button onClick="update_grsshopper('$Site->{st_cgi}'+'api.cgi?cmd=gRSShopper_update')">Update gRSShopper</button>|;
+	}
+
+	return qq|<div class="menubox">
+
+		<h3>Update gRSShopper</h3>
+		<script src="$Site->{st_url}/assets/js/jquery.js"></script>
+		<script>
+		function update_grsshopper(url) {
+
+
+			\$('#gRSShopper_update').load(url, function(response, status, xhr) {
+	        if (status == "error") {
+	            var msg = "Sorry but there was an error: ";
+	            alert(msg + xhr.status + " " + xhr.statusText);
+	        }
+	     });
+
+		}
+
+		</script>
+		<p><ul>
+		<div id="gRSShopper_update">$update_string</div>
+		</ul></p>
+
+	</div>|;
+
+}
 
 
 
