@@ -96,20 +96,28 @@
 
 		 #    use Image::Thumbnail 0.65;
 
-	#print "Content-type: text/html\n\n";
-		# $sth = $dbh->prepare("SELECT * FROM author");
-		# $sth->execute();
-	  # while (my $author = $sth -> fetchrow_hashref()) {
-	  #    if ($author->{author_name} eq "") {
-		#			print "Author: ".$author->{author_name}."-".$author->{author_title}."(".$author->{author_id}.")<br>";
-				#	$dbh->do("DELETE FROM author WHERE author_id=".$author->{author_id});
-		#		}
-	  #    if ($author->{author_name} =~ /=/) {
-		#			print "Author: ".$author->{author_name}."-".$author->{author_name}."(".$author->{author_id}.")<br>";
-				#	$dbh->do("DELETE FROM author WHERE author_id=".$author->{author_id});
-		#		}
-	  # }
+#	print "Content-type: text/html\n\n";
+#print "Scanning...<p>";
+#my @authorlist;
+#		 $sth = $dbh->prepare("SELECT * FROM link");
+#		 $sth->execute();
+#	   while (my $link = $sth -> fetchrow_hashref()) {
+#next if ($author->{author_name} =~ /\(/);
+#next if ($author->{author_name} =~ /\)/);
+#       print "Checking: ",$author->{author_name}," ...";
 
+#       if (grep( /$author->{author_name}/, @authorlist )) { print "Found duplicate: ",$author->{author_name},"<br>";}
+#my $str = ' ';
+#       unless ($author->{author_name} =~ /$str/) {
+#print "Found scammer: ",$author->{author_id},":",$author->{author_name},"<br>";
+
+#				 record_delete($dbh,$query,"link",$link->{link_id});
+#}
+
+#        push @authorlist,$author->{author_name};
+#       print "<br>";
+#	  }
+#exit;
 	#my $psql = "SELECT * FROM product";
 	#my $psth = $dbh->prepare($psql);
 	#$psth->execute();
@@ -521,6 +529,8 @@
 		my ($dbh,$query) = @_;
 
 	        my $content = &printlang("General Information");
+
+		$content .= &admin_update_grsshopper($dbh,$query);
 
 		$content .= &admin_configtable($dbh,$query,"Site Information",
 			("Site Name:st_name","Site Tag:st_tag","Publisher:st_pub","Creator:st_crea","License:st_license","Time Zone:st_timezone","Reset Key:reset_key","Cron Key:cronkey"));
@@ -1689,9 +1699,57 @@
 	}
 
 
+# --------------------------------------   Update gRSShopper -----------------------------------------------
+#
+#    Option to calls a shell script that downloads most recent gRSShopper code from
+#    GitHub and installs it in cgi-bin
+#
+# ------------------------------------------------------------------------------------------------------
 
 
+sub admin_update_grsshopper{
 
+	my ($dbh,$query) = @_;
+
+	return unless (&is_viewable("admin","update")); 		# Permissions
+
+  my $update_string = "";
+
+  my $local_version = &read_text_file('version.txt');
+	my $remote_version = get("https://raw.githubusercontent.com/Downes/gRSShopper/master/version");
+
+  if ($local_version eq  $remote_version) {
+    $update_string = "gRSShopper is up to date at version $local_version."
+	} else {
+		$update_string = qq|<p>Local version is $update_string and master version is $remote_version</p>
+			<button onClick="update_grsshopper('$Site->{st_cgi}'+'api.cgi?cmd=gRSShopper_update')">Update gRSShopper</button>|;
+	}
+
+	return qq|<div class="menubox">
+
+		<h3>Update gRSShopper</h3>
+		<script src="$Site->{st_url}/assets/js/jquery.js"></script>
+		<script>
+		function update_grsshopper(url) {
+
+
+			\$('#gRSShopper_update').load(url, function(response, status, xhr) {
+	        if (status == "error") {
+	            var msg = "Sorry but there was an error: ";
+	            alert(msg + xhr.status + " " + xhr.statusText);
+	        }
+	     });
+
+		}
+
+		</script>
+		<p><ul>
+		<div id="gRSShopper_update">$update_string</div>
+		</ul></p>
+
+	</div>|;
+
+}
 
 
 
@@ -3105,20 +3163,46 @@
 		$sth->finish;
 
 
+
 	$Site->{st_harvest_on} = "yes";
 
 											# Harvester
 		if ($Site->{st_harvest_on} eq "yes") {
 
+			my $h = qq|Harvesting: |.$Site->{st_harvest_on};
 
 			my $dividend = ($mday * 24 * 60) + ($hour * 60) + $min;
 			my $divisor = $Site->{st_harvest_int}; $divisor ||= 60;
+
+			my $h = qq|Harvesting: $dividend $divisor |.$Site->{st_harvest_on};
+$divisor = 1;
 			if ($dividend % $divisor == 0) {
-				$hn = "Harvesting";
+
+
+				my $hn = "Harvesting";
 				my $harvester = $Site->{st_cgif} . "harvest.cgi";
 				my $siteurl = $Site->{site_url}; $siteurl =~ s|http://||;$siteurl =~ s|/||;
-				my $status = system($harvester,$siteurl,$Site->{cronkey},"queue");
+				#my $status = system($harvester,$siteurl,$Site->{cronkey},"queue");
+        my @args = ($harvester,$ARGV[0],$ARGV[1],$ARGV[2],"queue");  # Making sure the call to harvester has the same args as the call to admin
+        system(@args) == 0
+		        or $hn .= "system @args failed: $?";
+#				&send_email("stephen\@downes.ca","stephen\@downes.ca","Harvester result $hn - : $?","Args: $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n");
+
+
+				if ($? == -1) {
+            $hn .= "failed to execute: $!\n";
+        }
+        elsif ($? & 127) {
+            $hn .= "child died with signal ".($? & 127);
+        }
+        else {
+            $hn .="child exited with value %d\n".($? >> 8);
+        }
+
+
 				if ($loglevel > 5) { $log .= "\nHarvester run, Status: $status\n"; }
+
+
 			}
 
 	  #  &send_email("stephen\@downes.ca","stephen\@downes.ca","Harvester - $Site->{st_url}","\nHarvester run, Status: $status\n");

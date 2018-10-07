@@ -30,6 +30,7 @@
 
   print "Content-type: text/html; charset=utf-8\n\n";
 
+
   use CGI::Carp qw(warningsToBrowser fatalsToBrowser);
   our $DEBUG = 1;							# Toggle debug
 
@@ -45,6 +46,8 @@
 	my $dirname = dirname(__FILE__);
 	require $dirname . "/grsshopper.pl";
 
+
+
 # Load modules
 
 	our ($query,$vars) = &load_modules("admin");
@@ -53,12 +56,15 @@
 # Load Site
 
 	our ($Site,$dbh) = &get_site("admin");
+  $Site->{cgif} ||= './';
+
 	if ($vars->{context} eq "cron") { $Site->{context} = "cron"; }
 	our $analyze = $vars->{analyze};
 	$Site->{diag_level} = 1;
 	if ($vars->{diag_level} && $vars->{analyze} eq "on") { $Site->{diag_level} = $vars->{diag_level}; }
   &diag(1,&harvester_stylsheet());
   &diag(1,"<h1><center>gRSShopper HARVESTER</h1>\n\n");
+
 
 # Get Person  (still need to make this an object)
 
@@ -74,10 +80,13 @@
 # Restrict to Admin
 
 	if ($vars->{context} eq "cron") {
-		$vars->{action} = $ARGV[2];
+		$vars->{action} = $ARGV[3];
 	} else {
 		&admin_only();
 	}
+
+
+#  &send_email("stephen\@downes.ca","stephen\@downes.ca","Inside the harvester","Args: $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n");
 
 
 # Analyze Request --------------------------------------------------------------------
@@ -119,6 +128,12 @@
 			exit;
 		}
 
+print qq|--------------------------------------------------------------------------
+
+     Harvesting Feed Number $feedid - $feedrecord->{feed_title}
+
+-------------------------------------------------------------------------------|;
+
     # Perform The Harvest, storing data into $feedrecord->{feedstring}
 		&harvest_feed($feedrecord,$feedid);
 
@@ -126,17 +141,18 @@
 	  &harvest_process_data($feedrecord);
 
   # SCRAPER - Optionally scrape unorganized data - perform any NLP here
-		require $Site->{cgif}."harvest/scraper.pl";
+	  my $dirname = dirname(__FILE__);
+    require $dirname."/harvest/scraper.pl";
 		&scrape_items($feedrecord);
 
   # CLEANER - get rid of garbage and make save for databases
 		&clean_feed_input($feedrecord);
 
   # RULES - apply processing rules to the data
-		require $Site->{cgif}."harvest/rules.pl";
+		require $dirname."/harvest/rules.pl";
 
   # SAVER - save data into the appropriate database tables
-		require $Site->{cgif}."harvest/save_feed.pl";
+		require $dirname."/harvest/save_feed.pl";
 		&save_records($feedrecord);
 
   # DISPLAY
@@ -207,8 +223,8 @@ sub harvest_feed {
 	my ($feedrecord,$feedid) = @_; 	my $now = time;
 	&diag(2,qq|<div class="function">Harvest Feed<div class="info">|);
 	&diag(2,qq|Feed ID: $feedid; \n\n|);
-print "Feedrecord - ",$feedrecord," - Feedid: ",$feedid,"<p>";
-
+print "\nFeedrecord - ",$feedrecord," - Feedid: ",$feedid,"<p>\n";
+	my $dirname = dirname(__FILE__);
 	# Display Feed Record Data
 	my $rep = "<b>Feed Record</b><br>";
 	while (my($fx,$fy) = each %$feedrecord) { if ($fy) { $rep .= qq|$fx = $fy <br>\n|; } }
@@ -219,12 +235,12 @@ print "Feedrecord - ",$feedrecord," - Feedid: ",$feedid,"<p>";
 
 	# Harvest Twitter
 	if ($feedrecord->{feed_type} =~ /twitter/i) {
-		require $Site->{cgif}."harvest/harvest_twitter.pl";
+		require $dirname."/harvest/harvest_twitter.pl";
 		&harvest_twitter($feedrecord);
 
 	# Harvest Facebook
 	} elsif ($feedrecord->{feed_type} =~ /facebook/i){
-		require $Site->{cgif}."harvest/harvest_twitter.pl";
+		require $dirname."/harvest/harvest_twitter.pl";
 		&harvest_facebook($feedrecord);
 
 	# Harvest URL
@@ -236,7 +252,8 @@ print "Feedrecord - ",$feedrecord," - Feedid: ",$feedid,"<p>";
 	if ($feedrecord->{feedstring}) {
 	   unless ( $analyze eq "on") {
 			 &diag(3,qq|<div class="detail">Feed $feedid lastharvest updated to $now</div>\n\n|);
-	   	 unless ($analyze eq "on") { &db_update($dbh,"feed",{feed_lastharvest=>$now},$feedid); }
+       $feedrecord->{feed_lastharvest} = $now;
+       &db_update($dbh,"feed",{feed_lastharvest=>$now},$feedid);
 		 }
   } else {
 		 &diag(2,qq|<div class="harvestererror">Could not retrieve data for $feedid</div>|);
@@ -259,24 +276,25 @@ sub harvest_process_data {
 	my ($feedrecord) = @_;
 	&diag(2,qq|<div class="function">Harvest Process Data<div class="info">|);
 	&diag(2,qq|Feed type:|.$feedrecord->{feed_type}."<br>");
+	my $dirname = dirname(__FILE__);
 
 	#&send_email("stephen\@downes.ca","stephen\@downes.ca","Processing Data",$feedrecord->{feedstring});
 
   # JSON
 	if ($feedrecord->{feed_type} =~ /json|facebook/i) {
 		&diag(1,"Feed is JSON<br>\n");
-		require $Site->{cgif}."harvest/parse_json.pl";
+		require $dirname."/harvest/parse_json.pl";
 		&parse_json($feedrecord);
 
 	# VCALENDAR
 	} elsif ($feedrecord->{feedstring} =~ /^BEGIN:VCALENDAR/) {
-		require $Site->{cgif}."harvest/parse_vcal.pl";
+		require $dirname."/harvest/parse_vcal.pl";
 		&diag(1,"Feed is vcalendar, ick<br>\n");
 		return;
 
 	# RSS / ATOM
 	} elsif ($feedrecord->{feedstring} =~ /<rss|<feed/i) {
-		require $Site->{cgif}."harvest/parse_feed.pl";
+		require $dirname."/harvest/parse_feed.pl";
 		&diag(1,"Harvesting RSS/Atom feed.<br>\n");
 		&parse_feed($feedrecord);
 

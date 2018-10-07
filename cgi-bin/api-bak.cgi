@@ -23,7 +23,7 @@
 #
 #-------------------------------------------------------------------------------
 
-# print "Content-type: text/html\n\n";
+
 
 # Forbid bots
 
@@ -40,41 +40,23 @@
 	require $dirname . "/grsshopper.pl";
 	use JSON;
 
-
-
-
 # Load modules
 
 	our ($query,$vars) = &load_modules("api");
   $vars->{db} ||= $vars->{table};
 	$vars->{table} ||= $vars->{db};
-  if ($vars->{source} && $vars->{target}) { $vars->{cmd} = "webmention"; }
-
-
-
-# Get Post Data
-  our $request_data;
-	my $postdata = $query->param('POSTDATA');
-	if ($postdata) {
-	    print "Found postdata<br>";
-			# Parse the JSON Data
-			use JSON::Parse 'parse_json';
-			use JSON;
-			$request_data = parse_json($postdata);
-			print "Content-type: text/html\n\n";
-			print "ok";
-			exit;
-	}
 
 # Load Site
 
-
 	our ($Site,$dbh) = &get_site("api");
 
+# Get Person  (still need to make this an object)
 
+	our $Person = {}; bless $Person;
+	&get_person($dbh,$query,$Person);
+	my $person_id = $Person->{person_id};
 
-# while (my($vx,$vy) = each %$vars) { print "$vx = $vy <br>"; }                      #"
-
+# while (my($vx,$vy) = each %$vars) { print "$vx = $vy <br>"; }
 
 
 
@@ -93,35 +75,35 @@
 	}
 
 	# SUBSCRIBE FORM
-	elsif ($vars->{cmd} eq "subform") {
+	if ($vars->{cmd} eq "subform") {
 		print "Content-type: text/html\n\n";
 		 print &api_subscription_form();
 		 exit;
 	}
 
   # SUBSCRIBE
-	elsif ($vars->{cmd} eq "subscribe") {
+	if ($vars->{cmd} eq "subscribe") {
 		print "Content-type: text/html\n\n";
 		 print &api_subscribe();
 		 exit;
 	}
 
 	# UNSUBSCRIBE FORM
-	elsif ($vars->{cmd} eq "unsubform") {
+	if ($vars->{cmd} eq "unsubform") {
 		print "Content-type: text/html\n\n";
 		 print &api_unsubscribe_form();
 		 exit;
 	}
 
 	# UNSUBSCRIBE
-	elsif ($vars->{cmd} eq "unsubscribe") {
+	if ($vars->{cmd} eq "unsubscribe") {
 		print "Content-type: text/html\n\n";
 		 print &api_unsubscribe();
 		 exit;
 	}
 
 	# CONFIRM
-	elsif ($vars->{cmd} eq "confirm") {
+	if ($vars->{cmd} eq "confirm") {
 		print "Content-type: text/html\n\n";
 		 print &api_confirm();
 		 exit;
@@ -180,74 +162,48 @@
 		print &api_show_record(); exit;
 	}
 
-  # WEBMENTION
-
-  elsif ($vars->{cmd} eq "webmention") {
-
-    print "Content-type: text/html\n\n";
- 		&record_sanitize_input($vars);
-		if ($vars->{source} =~ /$Site->{st_url}/) { print "Source domain the same as target."; exit;}
-    unless ($vars->{source}) { print "Webmention request incomplete. Needs to specify source URL"; exit; }
-		unless ($vars->{target}) { print "Webmention request incomplete. Needs to specify target URL"; exit; }
-
-    # Verify that my (target) URL exists
-    my ($table,$id) = &parse_my_url($vars->{target});
-    unless (&db_locate($dbh,$table,{$table."_id" => $id})) { print "Webmention error. Resource not found."; exit;}
-
-		# Verify that source links to target url
-		my $content = get($vars->{source});
-    if ($content =~ /<a(.*?)href="$vars->{target}"(.*?)>/) {    # Found it
-
-				# If necessary, create link record_delete
-				my $link_id = &db_locate($dbh,"link",{link_link => $vars->{source}});
-				$link_id ||= "new";
-				my $link_link = $vars->{source}; $link_link =~ s/'//; #'
-
-				# Get a title
-				my $link_title;
-				if ($content =~ m/<title>(.*?)<\/title>/si) {
-					$link_title = $1; $link_title =~ s/'/&apos;/g;    #'
-				}
-
-				%$vars = ();					# Clear all input data, to prevent injection
-				$vars->{link_link} = $link_link;
-				$vars->{link_id} = $link_id;
-				$vars->{link_title} = $link_title;
-				$vars->{link_crdate} = time;
-				$link_id = &record_save($dbh,$vars,"link",$vars);
-
-				# Create graph record linking target and Source
-				if ($link_id) {
-					&graph_add($table,$id,"link",$link_id,"webmention","");
-					print "Accepted";
-					exit;
-				} else {
-					print "Webreference error: could not save data.";
-					exit;
-				}
-    }  else {
-			print "Webreference error: source does not link to target.";
-			exit;
-		}
-
-		print "Webreference error.";
-		exit;
-
-	}
-
-	# Get Person  (still need to make this an object)
-
-		our $Person = {}; bless $Person;
-		&get_person($dbh,$query,$Person);
-		my $person_id = $Person->{person_id};
-
-
 	&admin_only();
   print "Content-type: text/html\n\n";
 
 # get Postdata, in which API JSON will be stored
 
 
+  my $postdata = $query->param('POSTDATA');
+  if ($postdata) {
+    print "Found postdata<br>";
+		# Parse the JSON Data
+		use JSON::Parse 'parse_json';
+		use JSON;
+		my $request_data = parse_json($postdata);
+
+		if ($request_data->{action} eq "search") {
+
+
+			# Table
+			unless ($request_data->{table}) { print "Error: table name must be provided."; exit; }
+			$request_data->{table} =~ s/[^a-zA-Z0-9 _]//g;  # Just make sure there's no funny business
+
+			my $sql = &create_sql($request_data->{table},$request_data->{language},$request_data->{sort},$request_data->{page});
+			my $query = '%'.$request_data->{query}.'%';
+
+			# Execute query and convert the result to JSON, then print
+			my $json->{entries} = $dbh->selectall_arrayref( $sql, {Slice => {} },$query,$query );
+			my $json_text = to_json($json);
+			print $json_text;
+      exit;
+
+    }
+
+
+
+			while (my($x,$y) = each %$request_data) { print "$x = $y <p>";}  											#{%}
+
+
+
+		print "Content-type: text/html\n\n";
+		print "ok";
+		exit;
+	}
 
 
 # -------------------------------------------------------------------------------------
@@ -268,8 +224,6 @@ if ($vars->{cmd}) {
 	# LIST
 
 	if ($vars->{cmd} eq "list") {
-
-  #  print "Content-type: text/html\n\n";
 
     # List Tables
 		if ($vars->{obj} eq "tables") { print &list_tables(); exit; }  # Temporary
@@ -436,14 +390,6 @@ if ($vars->{cmd}) {
 		exit;
 	}
 
-	# GRSSHOPPER UPDATE
-	elsif ($vars->{cmd} eq "gRSShopper_update") {
-    my $version = get("https://raw.githubusercontent.com/Downes/gRSShopper/master/version");
-		my $output = `../cgi-bin/update/update.sh`;
-		print "gRSShopper Update: $output <p>";
-		&write_text_file('version.txt',$version);
-    exit;
-	}
 	#----------------------------------------------------------------------------------------------------------
 	#
   #   gRSShopper Blockchain APIs (because I can't resist playing)
@@ -581,12 +527,10 @@ if ($vars->{cmd}) {
 		die "Input type not provided" unless ($vars->{type});
 	 # &record_sanitize_input($vars);
 
-		if ($vars->{type} eq "text" || $vars->{type} eq "textarea"  || $vars->{type} eq "wysihtml5" || $vars->{type} eq "select") {
-       &api_textfield_update(); }
+		if ($vars->{type} eq "text" || $vars->{type} eq "textarea"  || $vars->{type} eq "wysihtml5" || $vars->{type} eq "select") {  &api_textfield_update(); }
 
 		elsif ($vars->{type} eq "keylist") { &api_keylist_update();  }
 
-		elsif ($vars->{type} eq "datetime") { &api_datetime_update();  }
 
 		elsif ($vars->{type} eq "remove") { &api_keylist_remove(); }
 
@@ -613,24 +557,6 @@ if ($vars->{cmd}) {
 
 		elsif ($vars->{type} eq "commit") { &api_commit(); }
 
-
-			if ($request_data->{action} eq "search") {
-
-
-				# Table
-				unless ($request_data->{table}) { print "Error: table name must be provided."; exit; }
-				$request_data->{table} =~ s/[^a-zA-Z0-9 _]//g;  # Just make sure there's no funny business
-
-				my $sql = &create_sql($request_data->{table},$request_data->{language},$request_data->{sort},$request_data->{page});
-				my $query = '%'.$request_data->{query}.'%';
-
-				# Execute query and convert the result to JSON, then print
-				my $json->{entries} = $dbh->selectall_arrayref( $sql, {Slice => {} },$query,$query );
-				my $json_text = to_json($json);
-				print $json_text;
-	      exit;
-
-	    }
 
 
 	    # Identify, Save and Associate File
@@ -697,15 +623,7 @@ sub api_show_record {
 
 	 unless ($vars->{table}) { return "Don't know which table to show."; exit;}
 	 return unless (&is_allowed("view",$vars->{table}));
-
-	 # Set PLE start screen to login if needed
-	 if ($vars->{table} eq "box" && $vars->{id} eq "Start") {
-		 	our $Person = {}; bless $Person;
- 			&get_person($dbh,$query,$Person);
- 			my $person_id = $Person->{person_id};
-		 	&admin_only();
-	 }
-
+	 &admin_only() if ($vars->{table} eq "box" && $vars->{id} eq "Start");	# Sets PLE start screen to login if needed
 	 print "Content-type: text/html\n\n";
 
    unless ($vars->{id}) { return "Don't know which ".$vars->{table}." number to show."; exit;}
@@ -846,8 +764,6 @@ exit;
 
 
 }
-
-
 
 sub set_capcha {
 
@@ -1412,36 +1328,7 @@ sub api_textfield_update {
 
 
 }
-# API UPDATE ----------------------------------------------------------
-# ------- DateTime -----------------------------------------------------
-#
-# Update Date Time
-#
-# -------------------------------------------------------------------------
 
-sub api_datetime_update {
-
-
-	unless (&__check_field($vars->{table_name},$vars->{col_name})) {
-		print "Content-type: text/html\n\n";
-		print "Field does not exist";
-	  die "Field does not exist";
-	}
-
-  my $epoch = datepicker_to_epoch($vars->{value});
-	# Convert value to epoch (which is what we'll actually save for a datetime)
-
-	my $id_number = &db_update($dbh,$vars->{table_name}, {$vars->{col_name} => $epoch}, $vars->{table_id});
-
-	# Update the cached version of the record
-	if ($id_number) {
-		&output_record($dbh,$query,$vars->{table_name},$vars->{table_id},"viewer");
-		&api_ok();
-	} else { &api_error(); }
-	die "api failed to update $vars->{table_name}  $vars->{table_id}" unless ($id_number);
-
-
-}
 # API UPDATE ----------------------------------------------------------
 # ------- Publish -----------------------------------------------------
 #
@@ -1496,69 +1383,9 @@ sub api_publish {
 
 		}
 
-
-		elsif ($vars->{value} =~ /web/i) {
-
-			$vars->{force} = "yes"; 							# Over-write cache
-			&output_record($dbh,$query,$table,$id,"html","api");
-			my $url = $Site->{st_url}.$table."/".$id;
-
-			# Scan links for webmentions
-			my $record = &db_get_record($dbh,$table,{$table."_id"=>$id});
-			my $scan_content = $record->{$table."_description"}.$record->{$table."_content"};
-			my @links = $scan_content =~ /<a[^>]*\shref=['"](.*?)["']/gis;
-
-			# Add the post link to the list
-			push @links, $record->{post_link};
-
-			foreach my $l (@links) {
-
-				# Look for the link ID
-        print "Checking $l <br>";
-				my $lid = &db_locate($dbh,"link",{link_link => $l});
-				$lid ||= "new";
-
-				# Get the remote URL of the link
-				my $lcontent = get($l);
-
-				# Find the Link title
-				my $ltitle;
- 				if ($lcontent =~ m/<title>(.*?)<\/title>/si) { $ltitle = $1; }
-				elsif ($lcontent =~ m/<meta content=['"](.*?)['"] property=['"]og:title['"]\/>/) { $ltitle = $1; }       #'
-
-				# Save the link data
-				$vars->{link_link} = $l;
-				$vars->{link_id} = $lid;
-				$vars->{link_title} = $ltitle;
-				$vars->{link_crdate} = time;
-				$lid = &record_save($dbh,$vars,"link",$vars);
-
-				# Create graph record linking published record and link
-				if ($lid) {	&graph_add($table,$id,"link",$lid,"reference",""); }
-
-				# Look for webmention endpoint
-				my $endpoint = "";
-
-				my @bodylinks = $lcontent =~ /<a (.*?)>/gis;
-				foreach my $bl (@bodylinks) {	if ($bl =~ m/rel="webmention"/is) { $bl =~ m/href="(.*?)"/is; $endpoint=$1; last; }	}
-
-			  my @headlinks = $lcontent =~ /<link (.*?)>/gis;
-				foreach my $hl (@headlinks) {	if ($hl =~ m/rel="webmention"/is) { $hl =~ m/href="(.*?)"/is; $endpoint=$1; last; }	}
-
-				if ($endpoint) { &send_webmention($endpoint,$l,$Site->{st_url}.$table."/".$id); }
-			}
-
-			my $result = &db_update($dbh,$table, {$table."_web" => 1}, $id); # Prevent publishing twice
-			print qq|Published to <a href="$url">$url</a>|;
-			exit;
-		}
-
-		elsif ($vars->{value} =~ /json|rss/i) {
+		elsif ($vars->{value} =~ /web|json|rss/i) {
 
 			$published .= ",".$vars->{value};
-
-
-
 			my $result = &db_update($dbh,$table, {$col => $published}, $id); # Prevent publishing twice
 			print "Published to ".$vars->{value}."<p>";
 			exit;
@@ -1570,21 +1397,6 @@ sub api_publish {
 
 }
 
-
-sub send_webmention {
-
-  my ($endpoint,$target,$source) = @_;
-	my $ua = new LWP::UserAgent;
-
-  print "Sending webmention update to $endpoint <br>";
-  my $req = new HTTP::Request 'POST',$endpoint;
-  $req->content_type('application/x-www-form-urlencoded');
-  $req->content("source=$source&target=$target");
-  my $res = $ua->request($req);
-  print $res->as_string; print "<br>";
-
-
-}
 # API UPDATE ----------------------------------------------------------
 # ------- Create Column -----------------------------------------------------
 #
@@ -1860,23 +1672,6 @@ sub api_data_update {
     #enless ($id_number);
 
 
-}
-
-# Parses gRSShopper URLs to return table and ID of the requests
-# Used my the WEBMENTION api function
-
-sub parse_my_url {
-
-   my ($url) = @_;
-
-   my $base = $Site->{st_url};
-   if ($url =~ m/page\.cgi\?(.*?)=(.*?)$/) {
-			return ($1,$2);
-   } elsif ($url =~ /$base(.*?)\/(.*?)$/) {
-			return ($1,$2);
-   } else {
-			return 0;
-   }
 }
 
 sub api_ok {
@@ -2372,6 +2167,5 @@ if ($vars->{updated} || $vars->{cmd} eq "update") {
 }
 
 # Print OK for blank api request
-print "Content-type: text/html\n\n";
 print "OK";
 exit;

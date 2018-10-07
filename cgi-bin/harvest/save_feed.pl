@@ -77,6 +77,11 @@ sub save_records {
 		$item->{link_feedurl} = $feed->{feed_html};
 		$item->{link_feedid} = $feed->{feed_id};
 
+		# Classification Information
+		$item->{link_category} ||= $feed->{feed_category};
+		$item->{link_section} ||= $feed->{feed_section};
+		$item->{link_genre} ||= $feed->{feed_genre};
+
 		&find_feed_information($item);				# Find feed info that might be in the item record
 		&find_author_information($feedrecord,$feed,$item);				# Find authors and save as appropriate
 
