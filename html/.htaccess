@@ -1,29 +1,6 @@
-RewriteEngine on
-RewriteRule ^search/(.*) cgi-bin/page.cgi?q=$1
-RewriteRule ^chat cgi-bin/cchat.cgi
-RewriteRule ^cgi-bin/clist/(.*) cgi-bin/clist.cgi?req=$1
-RewriteRule ^page/(.*)/(.*) cgi-bin/page.cgi?page=$1&action=$2
-RewriteRule ^page/(.*) cgi-bin/page.cgi?page=$1
-RewriteRule ^post/(.*)/(.*) cgi-bin/page.cgi?post=$1&action=$2
-RewriteRule ^post/(.*) cgi-bin/page.cgi?post=$1
-RewriteRule ^topic/(.*)/(.*) cgi-bin/page.cgi?topic=$1&action=$2
-RewriteRule ^topic/(.*) cgi-bin/page.cgi?topic=$1
-RewriteRule ^thread/(.*)/(.*) cgi-bin/cchat.cgi?chat_thread=$1&action=$2
-RewriteRule ^thread/(.*) cgi-bin/cchat.cgi?chat_thread=$1
-RewriteRule ^feed/(.*)/(.*) cgi-bin/page.cgi?feed=$1&action=$2
-RewriteRule ^feed/(.*) cgi-bin/page.cgi?feed=$1
-RewriteRule ^author/(.*)/(.*) cgi-bin/page.cgi?author=$1&action=$2
-RewriteRule ^author/(.*) cgi-bin/page.cgi?author=$1
-RewriteRule ^link/(.*)/(.*) cgi-bin/page.cgi?link=$1&action=$2
-RewriteRule ^link/(.*) cgi-bin/page.cgi?link=$1
-RewriteRule ^event/(.*) cgi-bin/page.cgi?event=$1
-RewriteRule ^journal/(.*) cgi-bin/page.cgi?journal=$1
-RewriteRule ^person/(.*) cgi-bin/page.cgi?person=$1
-RewriteRule ^presentation/(.*)/(.*) cgi-bin/page.cgi?presentation=$1&action=$2
-RewriteRule ^presentation/(.*) cgi-bin/page.cgi?presentation=$1 
-RewriteRule ^login cgi-bin/login.cgi
-RewriteRule ^admin/(.*)/(.*)/(.*) cgi-bin/admin.cgi?db=$1&id=$2&action=$3
-RewriteRule ^admin/(.*)/(.*) cgi-bin/admin.cgi?db=$1&action=$2
-RewriteRule ^admin cgi-bin/admin.cgi
-
-
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI}
+RewriteRule ^(post|presentation|link|module|event|page|media)/([0-9]+)/rd$ http://plenk.mooc.ca/cgi-bin/page.cgi?$1=$2&action=rd
+RewriteRule ^(post|event|presentation|page|feed|author|link)/(.*)$ http://plenlk.mooc.ca/cgi-bin/page.cgi?$1=$2
+RewriteRule ^feed$ https://plenk.mooc.ca/news/OLDaily.xml
