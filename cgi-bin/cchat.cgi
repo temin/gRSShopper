@@ -1,5 +1,6 @@
 #!/usr/bin/env perl
 #print "Content-type: text/html\n\n";
+#use CGI::Carp qw(fatalsToBrowser);
 #    gRSShopper 0.2  CChat  0.4  -- gRSShopper administration module
 #    12 April 2011 - Stephen Downes
 #    Updated 2013 03 04 to use File::Basename
@@ -178,27 +179,27 @@ sub display {
   # Twitter
   my $htrigger = 0;  # Toggle to make sure we don't harvest on the same cycle
 	my $twittermsg = "";
-	if ((time - 25) > $channel->{channel_twitterstatus}) {
+#	if ((time - 20) > $channel->{channel_twitterstatus}) {
 
 		$twittermsg .= "Harvesting Twitter $channel->{channel_tag} <br>";
 
 		$twittermsg .= &twitter_harvest($channel);
     $htrigger=1;
-		&db_update($dbh,"channel", {channel_twitterstatus=>time}, $channel->{channel_id});
+#		&db_update($dbh,"channel", {channel_twitterstatus=>time}, $channel->{channel_id});
 
-	}
+#	}
 
   # Mastodon
   my $mastodonmsg = "";
-	if ((time - 35) > $channel->{channel_mastodonstatus} && $htrigger==0) {
+	#if ((time - 15) > $channel->{channel_mastodonstatus} && $htrigger==0) {
 
 		$mastodonmsg .= "Harvesting Mastodon $channel->{channel_tag} <br>";
 
 		$mastodonmsg .= &mastodon_harvest($channel);
 
-		&db_update($dbh,"channel", {channel_mastodonstatus=>time}, $channel->{channel_id});
+#		&db_update($dbh,"channel", {channel_mastodonstatus=>time}, $channel->{channel_id});
 
-	}
+#	}
 
 
 	# Get Next Chat Message
@@ -215,10 +216,10 @@ sub display {
 		$chat = $sth->fetchrow_hashref();
 	}
 
-	if ($chat->{chat_id}) {										#  Next chat item found, update channel
+	if ($chat->{chat_id}) {										#  Next chat item found, update channel and republish page
 		$current = $chat->{chat_id};
 		&db_update($dbh,"channel", {channel_current=>$current,channel_updated=>time}, $channel->{channel_id});
-
+    &refresh_activity_centre($dbh,$query);
 	} else {												# No next item, just get the old chat item
 		$chat = &db_get_record($dbh,"chat",{chat_id=>$current});
 	}
@@ -234,7 +235,7 @@ sub display {
 	print qq|
 		<span class="chat_title" style="text-align:left; color: $titlecolor; font: $titlefontsize Verdana,Arial, sans-serif;">
     Discussion channel: $channel->{channel_id} $channel->{channel_title}. $tagnote<br/>
-		$activity_message $twittermsg $mastodonmsg</span>
+		$activity_message<br/> $twittermsg <br/>$mastodonmsg</span>
 		<p style="text-align:left; font: $textsize Verdana,Arial, sans-serif;">
 		$desc
 		</p>
@@ -249,12 +250,22 @@ sub display {
 
 }
 
+# This reprints a ver verstion of course_activity_chatter.htm
+sub refresh_activity_centre {
+
+  my ($dbh,$query) = @_;
+  my $activity_page = &db_locate($dbh,"page",{page_location => 'course_activity_chatter.htm'});
+  unless ($activity_page) { print "Content-type:text/html\n\n"; print "Activity page $activity_page not found.<p>"; return; }
+  &publish_page($dbh,$query,$activity_page,"silent");
+
+}
+
 sub activated {
 
 	my ($dbh,$query,$channel) = @_;
 
 	my $latency = time - $channel->{channel_srefresh};
-	my $timeout = 1800;								# channels time out at 1800 seconds (1/2 hour)
+	my $timeout = 180000;								# channels time out at 1800 seconds (1/2 hour)
 
 	if ($latency < $timeout) {							# channel is active
 		unless ($channel->{channel_active} eq "yes") {				#     recently!
@@ -511,10 +522,6 @@ sub show_form {
     </td>
 		<tr>
 		<td colspan="4"><input type="text" placeholder="Signature" value="$pname" name="chat_signature" style="width:99%;"></td>
-		<tr><td colspan="4">
-    Also <input type="checkbox" name="post_twitter"> Post to Twitter
-    <input type="checkbox" name="post_mastodon"> Post to Mastodon
-    </td></tr>
     <tr><td colspan="4">
 		<input type="submit" name="button" value="Submit">
 		</table></form>\n
@@ -523,6 +530,11 @@ sub show_form {
 	|;
 	exit;
 
+$mastochat = qq|		<tr><td colspan="4">
+    Also <input type="checkbox" name="post_twitter"> Post to Twitter
+    <input type="checkbox" name="post_mastodon"> Post to Mastodon
+    </td></tr>
+|;
 
 }
 
@@ -796,7 +808,6 @@ sub twitter_harvest {
 
 	my $returnmsg = "";
 
-
 	&error($dbh,"","","Twitter posting requires values for consumer key, consumer secret, token and token secret")
 		unless ($Site->{tw_cckey} && $Site->{tw_csecret} && $Site->{tw_token} && $Site->{tw_tsecret});
 	my $nt = Net::Twitter::Lite::WithAPIv1_1->new(
@@ -814,7 +825,7 @@ my $r = "";
   if ( my $err = $@ ) {
 
 
-      print "HTTP Response Code: ", $err->code, "\n",
+      print "Error searching for tag (cchat.cgi line 816) HTTP Response Code: ", $err->code, "\n",
            "HTTP Message......: ", $err->message, "\n",
            "Twitter error.....: ", $err->error, "\n";
   }

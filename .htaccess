@@ -1,0 +1,6 @@
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI}
+RewriteRule ^(post|presentation|link|module|event|page|media)/([0-9]+)/rd$ http://el30.mooc.ca/cgi-bin/page.cgi?$1=$2&action=rd
+RewriteRule ^(post|event|presentation|page|feed|author|link)/(.*)$ http://el30.mooc.ca/cgi-bin/page.cgi?$1=$2
+RewriteRule ^feed$ https://el30.mooc.ca/news/OLDaily.xml

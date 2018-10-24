@@ -1,4 +1,4 @@
-var url = 'https://www.downes.ca/cgi-bin/api.cgi';
+var url = 'https://connect.downes.ca/cgi-bin/api.cgi';
 
 // Stores current status of the Reader
 var readerTable;

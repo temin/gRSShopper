@@ -1563,14 +1563,13 @@ sub format_record {
 
 
 
-
-
 											# No cached version, format record
 
 
 
 	my $view_text = "";								# Get the code and add header and footer for Page
 	if (($table eq "page") && ($record_format ne "page_list" && $record_format ne "summary") && !$keyflag) {
+
 			$view_text = &db_get_template($dbh,$filldata->{page_header}) .
 			$filldata->{page_code} .
 			&db_get_template($dbh,$filldata->{page_footer});
@@ -2305,6 +2304,7 @@ sub make_tz {
 sub make_keylist {
 
 	my ($dbh,$query,$text_ptr) = @_;
+
 	if ($diag>9) { print "Make Keylist <br>"; }
 
    	my $vars = ();
@@ -2381,7 +2381,7 @@ sub make_keylist {
 				if ($replace) { $replace .= $script->{separator}; }
 				if ($script->{format} eq "text") { $replace .= qq|$kname|; }
 				elsif ($script->{format}) {
-					my $ftext = &format_record($dbh,$query,$script->{keytable},"$script->{format}",$c);
+					my $ftext = &format_record($dbh,$query,$script->{keytable},$script->{format},$c,1);
 					$replace .= $ftext; }
 				else { $replace .= qq|<a href="$Site->{st_url}$script->{keytable}/$connection" style="text-decoration:none;">$kname</a>|; $replace =~ s/\n/<br\/>/ig; }
 
@@ -3044,6 +3044,8 @@ sub make_lunchbox {
 sub make_keywords {
 
 	my ($dbh,$query,$text_ptr) = @_;
+
+
 	if ($diag>9) { print "Make Keywords <br>"; }
 
    	my $vars = (); my $results_count=0;
@@ -3082,6 +3084,7 @@ sub make_keywords {
 
 						# Check Keyword Contents and Defaults
 		next unless ($script->{db});
+
 		$script->{number} ||= 50;
 
 						# Make SQL from Keyword Data
@@ -3244,6 +3247,8 @@ sub make_keywords {
 
 		$$text_ptr =~ s/\Q<keyword $autocontent>\E/$replace/;
 		$sth->finish( );
+
+
 	}
 
 
@@ -5522,10 +5527,20 @@ sub form_keylist {
 
 	my $keylist_text = &form_graph_list($table,$id,$key);
 
+  my $input_field;
+  my $count = &db_count($dbh,$key);
+  if ($count < 1) {
+		my $titles = &db_get_column($dbh,$key,$key."_title");
+    $input_field = qq|<select id="|.$col.qq|" name="$col">\n|;
+    foreach my $t (@$titles) {  $input_field .= qq|<option value="$t">$t</option>\n|; }
+    $input_field .= qq|<select><br>\n|;
+  } else {
+    $input_field = qq|<input type="text" class="empty-after" placeholder="Add $key_title" id="|.$col.qq|" style="width:|.$size.qq|em;max-width:100%;">|;
+  }
 
 	return qq|
 		<div><span id="|.$col.qq|_liveupdate">$keylist_text</span>
-		<input type="text" class="empty-after" placeholder="Add $key_title" id="|.$col.qq|" style="width:|.$size.qq|em;max-width:100%;">
+		$input_field
 		<span id="|.$col.qq|_button"><button>Update</button></span>
 		</div>
 
@@ -11048,7 +11063,10 @@ sub mastodon_post {
 
     my ($dbh,$table,$id,$tweet) = @_;
 
-    # Check and make sure it can be and hasn't been posted
+
+		&admin_only(); # We only want the site owner to be able to use icchat to post to mastodon
+
+# Check and make sure it can be and hasn't been posted
 
     return "Content information not defined" unless ($table && $id);
     return "Mastodon turned off."  unless ($Site->{mas_post} eq "yes");
@@ -11084,7 +11102,9 @@ sub mastodon_harvest {
 	  # Streaming interface might change!
 	#  use Mastodon::Client or print "Whga??";
 
-  return unless ($channel->{channel_tag});      # Harvest ONLY if there is a tag
+  unless ($channel->{channel_tag}) {
+     return qq|<span color="red">No mastodon tag detected</span>|;
+  }      # Harvest ONLY if there is a tag
   my $tag = "#".$channel->{channel_tag}; $tag =~ s/##/#/;
 
 	use Mastodon::Client;
@@ -11102,7 +11122,7 @@ sub mastodon_harvest {
 
 #return "tt<p>";
 
-  my $timeline = $client->timeline("public");
+  my $timeline = $client->timeline("public") or return "Mastodon harvest error.";;
 #return "Mastodon $tag $timeline <p>";
   foreach my $t (@$timeline) {
 #return "Found one: $t <br>";
@@ -11139,6 +11159,8 @@ sub mastodon_harvest {
 					# Nothing
 				} else {
 					my $id_number = &db_insert($dbh,$query,"chat",$chat);
+          unless ($id_number) { return qq|<span color="red">Error saving Mastodon chat comment</span>|;}
+return qq|$chat->{chat_description}|;
 				}
 
    }
@@ -11162,6 +11184,7 @@ sub twitter_post {
 
 	my ($dbh,$table,$id,$tweet) = @_;
 
+  &admin_only(); # We only want the site owner to be able to use icchat to post to Twitter
 
 	unless ($Site->{tw_post} eq "yes") { $vars->{twitter} .= "Twitter turned off."; return $vars->{twitter}; }
 
