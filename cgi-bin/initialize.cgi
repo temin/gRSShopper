@@ -1,5 +1,4 @@
 #!/usr/bin/env perl
-use CGI::Carp qw(fatalsToBrowser);
 print "Content-type:text/html\n\n";
 print "Initializing...<p>";
 
@@ -52,12 +51,6 @@ sub display_initialization_form {
 	my $row = qq|<tr><td align="right">|;
 	my $tab = qq|</td><td>|;
 	my $endrow = qq|</td></tr>|;
-  my $sturl; if ($Site->{st_url}) {
-		$sturl = $Site->{st_url};
-    $sturl =~ s|http://||ig;
-    $sturl =~ s|https://||ig;
-    $sturl =~ s|/$||ig;
-  }
 
 	print qq|
 
@@ -68,8 +61,8 @@ sub display_initialization_form {
 		Please enter database information for $Site->{st_host} <br><br>
 		<table cellspacing=1 cellpadding=2 border=0>
 
-    $heading Site URL: <br><br> $endrow
-    $row https://$tab$sturl $endrow
+
+
 
 		<!-- Database Info -->
 
@@ -197,7 +190,7 @@ sub process_initialization_form {
 	}
 
 	# Create Admin and anon Accounts
-
+	# Note: windows users must perform this step manually
 	my $site_admin_name = $vars->{site_admin_name};
 	my $encryptedPsw = &encryptingPsw($vars->{site_admin_pwd}, 4);
 	# Delete previous user with this username, if they exist
@@ -206,51 +199,6 @@ sub process_initialization_form {
 	my $id_number = &db_insert($dbh,"","person",{person_title=>$site_admin_name,person_password=>$encryptedPsw,person_status=>"admin"});
 #	if ($id_number) { print qq|Created Site Administrator - <a href="admin.cgi">click here to login</a><p>|; }
 #	else { print qq|error creating admin user.|; }
-
-
-# Create .htaccess
-my $host = $Site->{st_host};
-my $htaccessfile = $Site->{st_urlf}.".htaccess";
-open HTA,">$htaccessfile" or print "Can't print $htaccessfile $! $?";
-
-print HTA qq<
-RewriteEngine On
-RewriteCond %{HTTPS} off
-RewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI}
-RewriteRule ^(post|presentation|link|module|event|page|media)/([0-9]+)/rd\$ https://>;
-print HTA $host;
-print HTA qq</cgi-bin/page.cgi?\$1=\$2&action=rd
-RewriteRule ^(post|event|presentation|page|feed|author|link)/(.*)\$ https://>;
-print HTA $host;
-print HTA qq</cgi-bin/page.cgi?\$1=\$2
-RewriteRule ^feed\$ https://>;
-print HTA $host;
-print HTA qq</feed.xml>;
-
-print "<p> Printing $htaccessfile </p> ";
-
-print HTA $htaccess or print "Can't print $htaccessfile $! $?";
-close HTA;
-
-# Prepare gRSShopper_admin.js
-my $gajout="";
-my $gaj = $Site->{st_urlf}."assets/js/grsshopper_admin.js";
-print "Preparing $gaj <p>";
-my $newline = qq|var url = 'https://|.$host.qq|/cgi-bin/api.cgi';|;
-print $newline,"<p>";
-open JIN,$gaj or print "Cannot read $gaj : $! $? ";
-while (<JIN>) {
-   my $line = $_;
-   $line =~ s/var url = '(.*?)';/$newline/sig;
-   $gagout .= $line;
-}
-close JIN;
-
-open JOUT,">$gaj" or print "Cannot open for write $gaj : $! $? ";;
-print JOUT $gagout or print "Cannot print to $gaj : $! $? ";;
-close JOUT;
-
-
 
 	print "<p>Done.</p><p>";
 	print qq|[<a href="$Site->{st_cgi}login.cgi?action=login_text">Log in to your new gRSShopper PLE</a>]<br>|;

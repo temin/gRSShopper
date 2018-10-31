@@ -83,11 +83,12 @@ unless ($table && $action) {				# Print Form
   print qq|
      <form action="submit.cgi" method="post">
      <input type="hidden" name="table" value="feed">
-     <input type="hidden" name="id" value="new">
+     <input type="hidden" name="feed_id" value="new">
      Please enter your blog or feed information below:<br>
-     <input type=text size=80 name="title" placeholder="Feed or blog Title"><br>
-     <input type=text size=80 name="url" placeholder="Feed or blog URL"><br>
-     <input type=text size=80 name="author" placeholder="Your Name"><br>
+     <input type=text size=80 name="feed_title" placeholder="Feed or blog Title"><br>
+     <input type=text size=80 name="feed_html" placeholder="Feed or blog Web Page"><br>
+     <input type=text size=80 name="feed_link" placeholder="Feed or blog RSS/Atom/JSON feed link"><br>
+     <input type=text size=80 name="feed_author" placeholder="Your Name"><br>
      <input type="submit" name="action" value="Submit">
      </form>|;
 	exit;
@@ -107,10 +108,39 @@ if ($action) {						# Perform Action, or
 
 		/Submit/ && do {
 	   	print "Content-type: text/html; charset=utf-8\n\n";
+      unless ($vars->{feed_title}) { &missing_message("title"); }
+      unless ($vars->{feed_html}) { &missing_message("html"); }
+      unless ($vars->{feed_link}) { &missing_message("link"); }
+      if (&db_locate($dbh,"feed",{feed_title => $vars->{feed_title}})) { &exists_message("title"); }
+			if (&db_locate($dbh,"feed",{feed_html => $vars->{feed_html}})) { &exists_message("url"); }
+			if (&db_locate($dbh,"feed",{feed_link => $vars->{feed_link}})) { &exists_message("link"); }
+      if ($vars->{feed_link} =~ /twitter\.com/i) { &noneed_message("twitter"); }
+
+			# Test the feed link
+      unless (($vars->{feed_link} =~ /^http:\/\//i) or ($vars->{feed_link} =~ /^https:\/\//i)) {
+					$vars->{feed_link} = "http://".$vars->{feed_link};
+			}
+      print "Testing ".$vars->{feed_link}." ... ";
+			my $ua = LWP::UserAgent->new( );
+			  $ua->agent("gRSShopper"); # give it time, it'll get there
+        my $response = $ua->get($vars->{feed_link});
+			  if ($response->is_error( )) {
+			    printf "I'm so sorry, but it failed: %s <br>\n", $response->status_line;
+					print &back_button();
+					exit;
+			  } else {
+			    my $content = $response->content( );
+			    my $bytes = length $content;
+			    my $count = ($content =~ tr/\n/\n/);
+			    printf "Found: %d lines, %d bytes <br>\n", $count, $bytes;
+			  }
+
+
+      $vars->{feed_status} = "O";
 			my $id = &form_update_submit_data($dbh,$query,$table,$id);
       if ($id) { print "Thank you, your $table has been submitted.<br>"}
-      else { print "Sorry, I tried but I failed.<br>"}
-      last;
+      else { print "Sorry, I tried to save your feed but I failed.<br>"}
+      exit;
 
     	};
 
@@ -132,6 +162,50 @@ print "Location:".$Site->{st_url}."\n\n";
 
 exit;
 
+sub missing_message {
 
+  my ($item) = @_;
+  my $feeds_url = $Site->{st_cgi}.qq|page.cgi?page=Course Feeds&force=yes|;
+	print "You need to provide a $item for your feed.<br>";
+  print &back_button();
+	exit;
+
+}
+
+sub exists_message {
+
+  my ($item) = @_;
+  my $feeds_url = $Site->{st_cgi}.qq|page.cgi?page=Course Feeds&force=yes|;
+	print "This feed $item already exists.<br>";
+  print qq|Please check the <a href="$feeds_url">Course Feeds</a>. If you do not see your feed,
+		please contact the <a href="mailto:|.$Site->{st_pub}.qq|">site administrator</a>.<br>|;
+
+	exit;
+
+}
+
+sub noneed_message {
+
+  my ($item) = @_;
+  my $feeds_url = $Site->{st_cgi}.qq|page.cgi?page=Course Feeds&force=yes|;
+	print "You do not need to privide a Twitter feed; this site already searches through Twitter for the ".
+		$Site->{st_tag}." hashtag.<br>";
+
+	exit;
+
+}
+
+sub back_button {
+
+  return qq|
+		 <button onclick="goBack()">Go Back</button>
+		 <script>
+		 function goBack() {
+				 window.history.back();
+		 }
+		 </script>
+  |;
+
+}
 
 1;

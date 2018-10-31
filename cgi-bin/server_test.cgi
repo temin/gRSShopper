@@ -45,7 +45,7 @@ if ($@) {
 print " <span style='color:green;'> OK</span>$newline";
 }
 
-# use local::lib; # sets up a local lib at ~/perl5
+use local::lib; # sets up a local lib at ~/perl5
 
 # -----------------------------------------------------
 # Check that all of the required modules can be located

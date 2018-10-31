@@ -3094,7 +3094,7 @@ sub admin_update_grsshopper{
 		my $log = "";	# Flag that indicates whether an activity was logged
 		my $loglevel = 0;
 
-
+print "Content-type: text/html\n\n";
 		my $content = "Cron Report \n\n";
 		$content .= "Site Context: $Site->{context} \n\n";
 		$content .="0 $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n";

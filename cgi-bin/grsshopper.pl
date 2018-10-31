@@ -739,6 +739,7 @@ sub publish_page {
 
 		$wp->{page_content} = $wp->{page_code};
 
+		# Format page content (ef. fill in [*page_whatever*])
 
 
 		next unless (&is_allowed("publish","page",$wp));
@@ -1169,14 +1170,16 @@ sub list_records {
 
 	# Special search condition for feed, to list active feeds
 	if ($table eq "feed") {
-			$vars->{harvestable} ||= "Active";						# Default to feeds we're actually harvesting
-      if ($vars->{harvestable} eq "Active") {
-		    if ($where) { $where .= " AND "; } else { $where .= "WHERE "; }
-        $where .= qq|(feed_link <> '')|;
-			} elsif ($vars->{harvestable} eq "Inactive") {
-			  if ($where) { $where .= " AND "; } else { $where .= "WHERE "; }
-        $where .= qq|(feed_link = '')|;
-			}
+
+
+	#		$vars->{harvestable} ||= "Active";						# Default to feeds we're actually harvesting
+  #    if ($vars->{harvestable} eq "Active") {
+	#	    if ($where) { $where .= " AND "; } else { $where .= "WHERE "; }
+  #      $where .= qq|(feed_link <> '')|;
+	#		} elsif ($vars->{harvestable} eq "Inactive") {
+	#		  if ($where) { $where .= " AND "; } else { $where .= "WHERE "; }
+  #      $where .= qq|(feed_link = '')|;
+	#		}
 	}
 
 	# Count Results Again if necessary
@@ -1335,9 +1338,13 @@ sub list_search_form {
 
 
 		if ($table eq "feed") {  	# Make some special buttons for feeds
-		     $output .= qq|<tr><td  style="width: 3em;" colspan=2>Harvester:
-						 <input type="radio" name="harvestable" value="Inactive"> Inactive  |."|".qq|
-						 <input type="radio" name="harvestable" value="Active"> Active</td></tr>
+         my $imgdir = $Site->{st_url}."assets/img";
+		     $output .= qq|<tr><td  style="width: 3em;" colspan=2>
+						 <input type="checkbox" name="feed_status" value="On Hold"> <img src="$imgdir/Otiny.jpg"> On Hold <br />
+						 <input type="checkbox" name="feed_status" value="Active"> <img src="$imgdir/Atiny.jpg">Active <br />
+						 <input type="checkbox" name="feed_status" value="Retired"> <img src="$imgdir/Rtiny.jpg"> Retired <br />
+						 <input type="checkbox" name="feed_status" value="Unlinked"> <img src="$imgdir/Btiny.jpg"> Unlinked  <br />
+        </td></tr>
 			  |;
 		}
 
@@ -1422,7 +1429,8 @@ sub format_content {
 	$wp->{page_linkcount} = 0;
 
 
-	&make_data_elements($wp->{page_content},$wp,$wp->{page_format});		# Fill page content elements
+	&make_data_elements(\$wp->{page_content},$wp,$wp->{page_format});		# Fill page content elements
+
 	&make_boxes($dbh,\$wp->{page_content});						# Make Boxes
 	&make_counter($dbh,\$wp->{page_content});						# Make Boxes
 	my $results_count = &make_keywords($dbh,$query,\$wp->{page_content},$wp);	# Make Keywords
@@ -1482,7 +1490,7 @@ sub format_content {
 
 						# RSSify
 
-	if ($wp->{page_format} =~ /rss|xml|atom/i) {
+	if ($wp->{page_type} =~ /rss|xml|atom/i) {
 		&format_rssify(\$wp->{page_content});
 	}
 
@@ -1656,6 +1664,13 @@ sub format_record {
 }
 
 
+sub make_formatting {
+
+
+
+
+}
+
 	# -------   Set Formats ------------------------------------------------------
 sub esc_for_javascript {
 
@@ -1729,7 +1744,7 @@ sub set_mime_type {
 	} elsif ($page_format =~ /TEXT|TXT/i) {
 		$mime_type = "text/plain";
 	} elsif ($page_format =~ /JSON/i) {
-		$mime_type = "application/json";
+		$mime_type = "application/json;charset=utf-8";
 	} elsif ($page_format =~ /JS/i) {
 		$mime_type = "text/Javascript";
 	} else {
@@ -1953,6 +1968,7 @@ sub make_data_elements {
 
 	my @data_elements = ();
 	while ($$text_ptr =~ /\[\*(.*?)\*\]/) {
+
 		my $de = $1; push @data_elements,$de;
 		$$text_ptr =~ s/\[\*(.*?)\*\]/BEGDE $de ENDDE/si;
 	}
