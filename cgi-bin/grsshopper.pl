@@ -1182,6 +1182,13 @@ sub list_records {
 	#		}
 	}
 
+  # Require links to have a title
+	# - temporary until I get links sorted out
+  if ($table eq "link") {
+    if ($where) { $where .= " AND "; } else { $where .= "WHERE "; }
+		$where .= qq|(link_title <> '')|;
+	}
+
 	# Count Results Again if necessary
   if ($where) { $count = &db_count($dbh,$table,$where); }
 

@@ -3094,7 +3094,7 @@ sub admin_update_grsshopper{
 		my $log = "";	# Flag that indicates whether an activity was logged
 		my $loglevel = 0;
 
-print "Content-type: text/html\n\n";
+
 		my $content = "Cron Report \n\n";
 		$content .= "Site Context: $Site->{context} \n\n";
 		$content .="0 $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n";
@@ -3175,18 +3175,30 @@ print "Content-type: text/html\n\n";
 			my $divisor = $Site->{st_harvest_int}; $divisor ||= 60;
 
 			my $h = qq|Harvesting: $dividend $divisor |.$Site->{st_harvest_on};
-$divisor = 1;
-			if ($dividend % $divisor == 0) {
 
 
-				my $hn = "Harvesting";
-				my $harvester = $Site->{st_cgif} . "harvest.cgi";
+
+
+
+
+$divisor = 10;
+			if ($dividend % $divisor == 0) {  # Harvest timer
+
+				# We need to get the actual directory of admin.cgi
+				use Cwd 'abs_path';
+				my $harvester = abs_path($0);
+
+				# Now figure out the directory of harvest.cgi
+				$harvester =~ s/admin\.cgi/harvest\.cgi/i;
+
+				my $hn = "Harvesting $harvester <p>\n\n";
+
 				my $siteurl = $Site->{site_url}; $siteurl =~ s|http://||;$siteurl =~ s|/||;
 				#my $status = system($harvester,$siteurl,$Site->{cronkey},"queue");
         my @args = ($harvester,$ARGV[0],$ARGV[1],$ARGV[2],"queue");  # Making sure the call to harvester has the same args as the call to admin
         system(@args) == 0
 		        or $hn .= "system @args failed: $?";
-#				&send_email("stephen\@downes.ca","stephen\@downes.ca","Harvester result $hn - : $?","Args: $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n");
+				&send_email("stephen\@downes.ca","stephen\@downes.ca","Harvester result $hn - : $?","Args: $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n");
 
 
 				if ($? == -1) {
@@ -3199,7 +3211,7 @@ $divisor = 1;
             $hn .="child exited with value %d\n".($? >> 8);
         }
 
-
+print "$hn <p>\n\n";
 				if ($loglevel > 5) { $log .= "\nHarvester run, Status: $status\n"; }
 
 
