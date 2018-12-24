@@ -12,7 +12,6 @@ function startUp(url) {
 
   $( document ).ready(function() {
 
-    openDiv(url,'Reader','show','box','Start','Reader');
     read_into({div:"Read",cmd:"list",table:"link",tab:"Read"});
     read_into({div:"Make",cmd:"list_tables",table:"tables",tab:"Make"});
     $('#list-button').hide();

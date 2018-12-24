@@ -22,7 +22,7 @@
 #           Admin Functions
 #
 #-------------------------------------------------------------------------------
-  # print "Content-type: text/html\n\n";
+# print "Content-type: text/html\n\n";
 	use CGI::Carp qw(fatalsToBrowser);
 
 
@@ -44,6 +44,8 @@
 	      use local::lib; # sets up a local lib at ~/perl5
 		my $dirname = dirname(__FILE__);
 		require $dirname . "/grsshopper.pl";
+
+
 
 
 	# Load modules
@@ -81,9 +83,69 @@
 
 	# Restrict to Admin
 
+
+
+# Badgr Test
 		if ($vars->{context} eq "cron") { &cron_tasks($dbh,$query,$ARGV); } else { &admin_only(); }
 
+			if ($vars->{badgr}) {
 
+				print "Content-type:text/html\n\n";
+
+  			# Initialize Badgr
+				our $Badgr = gRSShopper::Badgr->new({
+          badgr_url   => $Site->{badgr_url},
+					badgr_account		=>	$Site->{badgr_account},
+					badgr_password => $Site->{badgr_password},
+          badgr_issuerid => $Site->{badgr_issuerid},
+					secure => 1,							# Turns on SSH
+				});
+
+				# Store new access token
+				my $config->{badgr_cckey} = $Badgr->{access_token};
+				&admin_update_config($dbh,$query,0,$config);
+
+				# Execute Badger Commands
+				if  ($vars->{badgr} eq "issuer") {
+
+					# Create Issuer
+
+					# Init and check data
+					print "Content-type:text/html\n\n";
+					unless ($Site->{st_email}) { print "You need to define an admin email to use Badgr."; exit; }
+					unless ($Site->{st_url}) { print "You need to define a site url to use Badgr."; exit; }
+					$Site->{st_name} ||= $Site->{st_url};
+	        $Site->{st_desc} ||= $Site->{st_name};
+
+					# Create Issuer
+					$Badgr->create_issuer({
+			  		name => $Site->{st_name},
+			  		email => $email,
+			  		description => "Tester",
+			  		url => $Site->{st_name}
+					});
+
+					# Store newly created issuer
+					my $config_iss->{badgr_issuerid} = $Badgr->{badgr_issuerid};
+				  &admin_update_config($dbh,$query,0,$config_iss);
+				}
+
+				$badge->{badge_entityid} = "";
+				if ($vars->{badgr} eq "award") {
+my $emailaddr = 'stephen@downes.ca';
+					$Badgr->award_badge(
+						{
+						badge_entityid=>"m1-bQL4ISHeL_oPGlKgDYw"
+						},
+						{
+						email=>$emailaddr,
+						},
+						{
+						url=>"http://www.downes.ca"
+						});
+				}
+			exit;
+		}
 
 
 	# To fix
@@ -533,7 +595,7 @@
 		$content .= &admin_update_grsshopper($dbh,$query);
 
 		$content .= &admin_configtable($dbh,$query,"Site Information",
-			("Site Name:st_name","Site Tag:st_tag","Publisher:st_pub","Creator:st_crea","License:st_license","Time Zone:st_timezone","Reset Key:reset_key","Cron Key:cronkey"));
+			("Site Name:st_name","Site Tag:st_tag","Email:st_email","Description:st_desc","Publisher:st_pub","Creator:st_crea","License:st_license","Time Zone:st_timezone","Reset Key:reset_key","Cron Key:cronkey"));
 
 
 		$content .= &admin_api($dbh,$query);
@@ -793,6 +855,12 @@
 		$content .= &admin_configtable($dbh,$query,"Mastodon",
 			("Mastodon Instance:mas_instance","Post to Mastodon:mas_post:yesno","Use Site Hashtag:mas_use_tag:yesno","Client ID:mas_cli_id","Client Secret:mas_cli_secret","Access Token:mas_acc_token"));
 		$content .= qq|To fill this form, login to Mastodon and then <a href="https://takahashim.github.io/mastodon-access-token/">get access token</a><br>|;
+
+		$content .= &admin_configtable($dbh,$query,"Badgr",
+			("Badgr API base URL:badgr_url","Badgr Account ID (email):badgr_account","Badgr Account Password:badgr_password","Access Key:badgr_cckey","Issuer ID:badgr_issuerid"));
+    $content .= sprintf(qq|To create and award badges, <a href="https://badgr.io/auth/login">create a Badgr account</a> and input email address and password above. The Base URL is usually https://api.badgr.io and the Access key is automatically generated.
+       However, before badges are awarded, a Badge Issuer must be created; <a href="%sadmin.cgi?action=badgr&badgr=issuer">Click here</a> to generate an Issuer
+       automatically.|,$Site->{st_cgi});
 
 		&admin_frame($dbh,$query,"Admin Accounts",$content);					# Print Output
 		exit;
@@ -1658,11 +1726,13 @@
 
 	sub admin_update_config {
 
-		my ($dbh,$query,$silent) = @_;
+		my ($dbh,$query,$silent,$config) = @_;
 		return unless (&is_allowed("edit","config"));
 
+		while (my ($vx,$vy) = each %$vars) { $config->{$vx} = $vy; }
+
 		# Update Config Table
-		while (my ($vx,$vy) = each %$vars) {
+		while (my ($vx,$vy) = each %$config) {
 
 			next if ($vx =~ /^(action|mode|cronsite|format|button|force|comment|id|title|mod_load|msg|test)$/);
 
@@ -1691,7 +1761,7 @@
 		while (my $c = $sth -> fetchrow_hashref()) { $Site->{$c->{config_noun}} = $c->{config_value}; }
 		$sth->finish();
 
-
+    return if ($config);		# 'config' allows config to be set on the fly
 
 		# Display Admin Page
 		unless ($silent) { &admin_sorter($dbh,$query,$vars->{title}); }
@@ -3092,30 +3162,20 @@ sub admin_update_grsshopper{
 		my ($dbh,$query) = @_;
 
 		my $log = "";	# Flag that indicates whether an activity was logged
-		my $loglevel = 0;
+		my $loglevel = 10;
 
+    if ($loglevel > 5) { $log .= sprintf("Context:%s, Args 0:%s, %s, 1:%s, 2:%s, 3:%s\n",
+			$Site->{context},$ARGV[0],$ARGV[1],$ARGV[2],$ARGV[3]); }
 
-		my $content = "Cron Report \n\n";
-		$content .= "Site Context: $Site->{context} \n\n";
-		$content .="0 $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] \n";
-		$content .= qq|
-		Home: $Site->{st_home}
-		Site URL: $Site->{st_url}
-		Script: $Site->{script}
-		|;
-		print $content;
-
-											# Confirm cron key
+		# Confirm cron key
 		my $cronkey = $ARGV[1] || $vars->{cronkey};
 		unless ($Site->{cronkey} eq $cronkey) {
-			print "Error: Cron key mismatch. $vars->{cronkey} must match the value of the cronkey set in $Site->{st_name} admin: $Site->{cronkey} :\n";
-			&send_email("stephen\@downes.ca","stephen\@downes.ca","Cron Error in cron - $Site->{st_url}","Args: $ARGV[0] 1 $ARGV[1] 2 $ARGV[2] 3 $ARGV[3] <p>Error: Cron key mismatch. $ARGV[1] must match the value of the cronkey set in $ARGV[0] admin\n");
+			&log_cron(0,$log.sprintf("Error: Cron key mismatch. %s must match the value of the cronkey set in %s admin.",
+				$vars->{cronkey},$Site->{st_name}));
 			exit;
 		}
 
-
-
-											# Get the time
+		# Get the time
 		my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
 		my @wdays = qw|Sunday Monday Tuesday Wednesday Thursday Friday Saturday|;
 		my $weekday = @wdays[$wday];
@@ -3123,16 +3183,15 @@ sub admin_update_grsshopper{
 		$mon++;if ($mon < 10) { $mon = "0".$mon; }
 		if ($min < 10) { $min = "0".$min; }
 		if ($mday < 10) { $mday = "0".$mday; }
-		if ($loglevel > 5) { $log .= "Calculated time as: Hour = $hour and minute = $min\n"; }
+		if ($loglevel > 1) { $log .= "Hour: $hour, Minute = $min\n"; }
+		elsif ($loglevel > 0) { $log .= "$hour:$min - "; }
 
-
-
-											# Autopublish
+		# Autopublish
 		my $asql=""; my $amode;
 		if ($weekday eq "Sunday" && $hour eq "23" && $min eq "54")
 			{ $amode = "Weekly"; $asql = qq|SELECT * FROM page WHERE page_autopub='yes' AND page_autowhen='Weekly'|; }
-		elsif ($hour eq "23" && $min eq "50") { $amode = "Daily";  $asql = qq|SELECT * FROM page WHERE page_autopub='yes' AND page_autowhen='Daily'|; }
-		elsif ($min eq "40") { $amode = "Hourly"; $asql = qq|SELECT * FROM page WHERE page_autopub='yes' AND page_autowhen='Hourly'|; }
+		elsif ($hour eq "16" && $min eq "30") { $amode = "Daily";  $asql = qq|SELECT * FROM page WHERE page_autopub='yes' AND page_autowhen='Daily'|; }
+		elsif ($min eq "37") { $amode = "Hourly"; $asql = qq|SELECT * FROM page WHERE page_autopub='yes' AND page_autowhen='Hourly'|; }
 
 		if ($amode) { $log .= "Autopublish mode triggered: $amode \n"; }
 		if ($asql) {
@@ -3146,8 +3205,7 @@ sub admin_update_grsshopper{
 			$asth->finish;
 		}
 
-											# Newsletters
-
+		# Newsletters
 		my $sql = qq|SELECT * FROM page WHERE page_subhour=? AND page_submin=? AND (page_subwday LIKE ? OR page_submday LIKE ?)|;
 		my $sth = $dbh -> prepare($sql);
 
@@ -3225,15 +3283,16 @@ print "$hn <p>\n\n";
 		$Site->{log_items} eq "yes";
 
 											# Hourly Tasks
-		if ($min eq "19") {
-			my $deletelink = '\'%wxMONCTON%\'';				# Removes hourly environment Canada weather updates after an hour
-			my $dsql = qq|select link_id FROM link WHERE link_link LIKE $deletelink|;
-			my $sthl = $dbh->prepare($dsql);
-			$sthl->execute();
-			while (my $stale_link = $sthl -> fetchrow_hashref()) {
-				&record_delete($dbh,$query,"link",$stale_link->{link_id});
-				if ($loglevel > 2) { $log .= "Deleted bad link $stale_link->{link_id} \n"; }
-			}
+		if ($min eq "33") {
+
+	#		my $dsql = qq|select link_id FROM link WHERE link_link LIKE $deletelink|;
+#print $dsql;
+	#		my $sthl = $dbh->prepare($dsql);
+	#		$sthl->execute();
+#			while (my $stale_link = $sthl -> fetchrow_hashref()) {
+			#	&record_delete($dbh,$query,"link",$stale_link->{link_id});
+	#			if ($loglevel > 2) { $log .= "Deleted bad link $stale_link->{link_id} \n"; }
+	#		}
 
 
 		}
@@ -3284,7 +3343,7 @@ print "$hn <p>\n\n";
 			my $sthl = $dbh->prepare($dsql);
 			$sthl->execute();
 			while (my $stale_link = $sthl -> fetchrow_hashref()) {
-				&record_delete($dbh,$query,"link",$stale_link->{link_id});
+	#			&record_delete($dbh,$query,"link",$stale_link->{link_id});
 				if ($loglevel > 2) { $log .= "Deleted stale link $stale_link->{link_id} \n"; }
 			}
 		}
@@ -3303,17 +3362,8 @@ print "$hn <p>\n\n";
 
 		}
 
-
-	#	unless ($log) { &log_cron($log); }  # Sends empty log report
-
-		my $logtitle = "$Site->{st_name} cron log report for ".localtime(time);
-		if ($log && $loglevel > 0) {
-			$log = $logtitle."\n\n".$log;
-			&send_email("stephen\@downes.ca","stephen\@downes.ca",$logtitle,"$log");
-		}
-
-
-
+    my $ltime = localtime(time);
+	  &log_cron(0,sprintf("%s cron completed for %s",$Site->{st_name},$ltime));
 		exit;
 	}
 

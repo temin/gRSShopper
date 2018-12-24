@@ -1,7 +1,8 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
 use strict;
 use warnings;
+
 
 $!++;							# CGI
 use CGI qw(header);
@@ -17,8 +18,7 @@ print header('application/json');
 
 use File::Basename qw(dirname);
 use Cwd  qw(abs_path);
-use lib dirname(dirname abs_path $0) . '/modules/Blockchain/lib';
-
+use lib dirname(dirname abs_path $0) . '/cgi-bin/modules/Blockchain/lib';
 use Blockchain;
 
 
@@ -35,9 +35,16 @@ use Blockchain;
 if ($vars->{cmd} eq "transaction") {
 
 	my $blockchain = new Blockchain;
-	die "Missing values in blockchain transaction" unless ($vars->{sender} && $vars->{recipient} && $vars->{amount});
-	my $index = $blockchain->new_transaction($vars->{sender},$vars->{recipient},$vars->{amount});
-	my $response = {message => "Transaction will be added to Block $index"};
+	#die "Missing values in blockchain transaction" unless ($vars->{sender} && $vars->{recipient} && $vars->{amount});
+  delete $vars->{cmd};
+  my $index = $blockchain->new_transaction($vars);          # So I can store anything I want in this blockchain
+
+#	my $index = $blockchain->new_transaction({
+#				sender => $vars->{sender},
+#				recipient => $vars->{recipient},
+#				amount => $vars->{amount}
+#			});
+	my $response = {message => "Transaction $index will be added to Block"};
 
 	&blockchain_close($blockchain);
 
@@ -47,29 +54,10 @@ if ($vars->{cmd} eq "transaction") {
 
 # MINE
 elsif ($vars->{cmd} eq "mine") {
-
+print "Content-type: tet/html\n\n";
+print "mining";
 	my $blockchain = new Blockchain;
-	my $node_identifier = 1;
-
-	# We run the proof of work algorithm to get the next proof...
-	my $last_block = $blockchain->last_block();
-	my $last_proof = $last_block->{proof};
-	my $proof = $blockchain->proof_of_work($last_proof);
-
-	# We must receive a reward for finding the proof.
-	# The sender is "0" to signify that this node has mined a new coin.
-	$blockchain->new_transaction(0,$node_identifier,1);
-	my $previous_hash = $blockchain->hash($last_block);
-	my $block = $blockchain->new_block($proof,$previous_hash);
-
-	my $response = {
-		message => "New Block Forged",
-		index => $block->{index},
-		transactions =>  $block->{transactions},
-		proof =>  $block->{proof},
-		previous_hash => $block->{previous_hash}
-	};
-
+  my $response = $blockchain->mine();
 	&blockchain_close($blockchain);
 	print encode_json( $response );
 	exit;

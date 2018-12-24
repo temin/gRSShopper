@@ -1,6 +1,6 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 
-
+		use CGI::Carp qw(fatalsToBrowser);
 
 #    gRSShopper 0.7  Harvester  0.6  -- gRSShopper harvester module
 #    04 March 2018 - Stephen Downes
@@ -30,7 +30,6 @@
 
   print "Content-type: text/html; charset=utf-8\n\n";
 
-
   use CGI::Carp qw(warningsToBrowser fatalsToBrowser);
   our $DEBUG = 1;							# Toggle debug
 
@@ -58,13 +57,13 @@
 	our ($Site,$dbh) = &get_site("admin");
   $Site->{cgif} ||= './';
 
-	if ($vars->{context} eq "cron") { $Site->{context} = "cron"; }
+	if ($vars->{context} eq "cron") { $Site->{context} = "cron"; }				# Allows the user to toggle cron reports on/off manually
 	our $analyze = $vars->{analyze};
 	$Site->{diag_level} = 1;
 	if ($vars->{diag_level} && $vars->{analyze} eq "on") { $Site->{diag_level} = $vars->{diag_level}; }
   &diag(1,&harvester_stylsheet());
   &diag(1,"<h1><center>gRSShopper HARVESTER</h1>\n\n");
-
+  &log_cron(9,"Harvester activated");
 
 # Get Person  (still need to make this an object)
 
@@ -117,7 +116,7 @@
 			/queue/ && do { $feedid = &harvest_queue(); last; }; # Harvest next in the queue
 	  }
 
-	# GETTER - get the feed we are harvesting
+	  # GETTER - get the feed we are harvesting
 
 		# Get Feed Data (Exit if not found) and store in $feedrecord
 
@@ -128,11 +127,6 @@
 			exit;
 		}
 
-print qq|--------------------------------------------------------------------------
-
-     Harvesting Feed Number $feedid - $feedrecord->{feed_title}
-
--------------------------------------------------------------------------------|;
 
     # Perform The Harvest, storing data into $feedrecord->{feedstring}
 		&harvest_feed($feedrecord,$feedid);
@@ -189,27 +183,16 @@ print qq|-----------------------------------------------------------------------
 
 sub harvest_queue {
 
-  #	my () = @_;
-	&diag(2,qq|<div class="function">Harvest  Queue<div class="info">|);
-
 	# Find next feedid in queue
 	my $stmt = "SELECT feed_id FROM feed WHERE feed_link <>'' AND (feed_status = 'A' OR feed_status = 'Published') ORDER BY feed_lastharvest LIMIT 0,1";
 	my $next = $dbh->selectrow_hashref($stmt);
 	my $feedid = $next->{feed_id};
+	&log_cron(4,sprintf("Harvesting from queue, feedid %s",$feedid));
 
   # If found, Harvest Feed
-#	if ($next->{feed_id}) {
-#	  &diag(2,qq|Next in queue is feed number $feedid<br>\n\n|);
-#		&harvest_feed($feedid);
-	#} else {
-#    &diag(2,qq|<div class="harvestererror">Cannot find next feedid in queue</div>|);
-#		return;
-
-#	}
-
-  # Done
-	&diag(2,qq|</div></div>\n\n|);
-	return $next->{feed_id};
+  return $next->{feed_id} if ($next->{feed_id});
+	&log_cron(0,"ERROR: Cannot find next feedid in queue\n");
+	return 0;
 
 }
 
@@ -220,17 +203,12 @@ sub harvest_queue {
 
 sub harvest_feed {
 
-	my ($feedrecord,$feedid) = @_; 	my $now = time;
-	&diag(2,qq|<div class="function">Harvest Feed<div class="info">|);
-	&diag(2,qq|Feed ID: $feedid; \n\n|);
-print "\nFeedrecord - ",$feedrecord," - Feedid: ",$feedid,"<p>\n";
-	my $dirname = dirname(__FILE__);
-	# Display Feed Record Data
-	my $rep = "<b>Feed Record</b><br>";
-	while (my($fx,$fy) = each %$feedrecord) { if ($fy) { $rep .= qq|$fx = $fy <br>\n|; } }
-	&diag(4,qq|<div class="data">$rep</div>\n\n|);
-  # &send_email("stephen\@downes.ca","stephen\@downes.ca","$feedrecord->{feed_title}",$rep);
+	my ($feedrecord,$feedid) = @_;
+	die "Missing input to harvest_feed()" unless ($feedrecord && $feedid);
 
+	&log_cron(1,sprintf("Harvesting feed %s %s %s",$feedid,$feedrecord->{feed_title},$feedrecord->{feed_link}));
+
+	my $dirname = dirname(__FILE__);
 	$feedrecord->{crdate} = time;
 
 	# Harvest Twitter
@@ -240,7 +218,7 @@ print "\nFeedrecord - ",$feedrecord," - Feedid: ",$feedid,"<p>\n";
 
 	# Harvest Facebook
 	} elsif ($feedrecord->{feed_type} =~ /facebook/i){
-		require $dirname."/harvest/harvest_twitter.pl";
+		require $dirname."/harvest/harvest_facebook.pl";
 		&harvest_facebook($feedrecord);
 
 	# Harvest URL
@@ -248,15 +226,15 @@ print "\nFeedrecord - ",$feedrecord," - Feedid: ",$feedid,"<p>\n";
 		&get_url($feedrecord,$feedid);
 	}
 
+	# Update last=harvest-date
+	my $now = time;
+	$feedrecord->{feed_lastharvest} = $now;
+	&db_update($dbh,"feed",{feed_lastharvest=>$now},$feedid);
+
 	# Update last harvest date
-	if ($feedrecord->{feedstring}) {
-	   unless ( $analyze eq "on") {
-			 &diag(3,qq|<div class="detail">Feed $feedid lastharvest updated to $now</div>\n\n|);
-       $feedrecord->{feed_lastharvest} = $now;
-       &db_update($dbh,"feed",{feed_lastharvest=>$now},$feedid);
-		 }
-  } else {
-		 &diag(2,qq|<div class="harvestererror">Could not retrieve data for $feedid</div>|);
+	unless ($feedrecord->{feedstring}) {
+		 &log_cron(2,qq|Could not retrieve data for $feedid\n|);
+		 exit;
 	}
 
 
@@ -276,6 +254,7 @@ sub harvest_process_data {
 	my ($feedrecord) = @_;
 	&diag(2,qq|<div class="function">Harvest Process Data<div class="info">|);
 	&diag(2,qq|Feed type:|.$feedrecord->{feed_type}."<br>");
+	&log_cron(9,sprintf("Harvest Process Data for feedid %s",$feedrecord->{feed_id}));
 	my $dirname = dirname(__FILE__);
 
 	#&send_email("stephen\@downes.ca","stephen\@downes.ca","Processing Data",$feedrecord->{feedstring});

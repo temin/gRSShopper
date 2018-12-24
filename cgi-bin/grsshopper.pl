@@ -197,6 +197,7 @@ sub get_site {
 sub get_config {
 
 	my ($dbh) = @_;
+
 	my $sth = $dbh->prepare("SELECT * FROM config");
 	$sth -> execute() or die "Failed to load site configuration data";
 	while (my $c = $sth -> fetchrow_hashref()) {
@@ -240,9 +241,8 @@ sub get_person {
 
 	}
 
-
 						# Define Cookie Names
-	my $site_base = &get_cookie_base();
+	my $site_base = &get_cookie_base("a");
 	my $id_cookie_name = $site_base."_person_id";
 	my $title_cookie_name = $site_base."_person_title";
 	my $session_cookie_name = $site_base."_session";
@@ -314,10 +314,12 @@ sub get_person {
 	# as defined in global $Site->{st_url} variable
 sub get_cookie_base {
 
-	my $site_base = $Site->{'st_url'};	# Get Site Cookie Prefix
+  my ($a) = @_;  # $a can be used for diagnostics
+
+	my $site_base = $Site->{st_url};	# Get Site Cookie Prefix
 	$site_base =~ s/http(s|):|\///ig;
 	$site_base =~ s/\./_/ig;
-	&error("","","",&printlang("Site info not found","get_cookie_base")) unless $site_base;
+	die "Site info not found in get_cookie_base" unless $site_base;
 	return $site_base;
 }
 
@@ -439,7 +441,7 @@ sub check_status {
 							# Verify Site information and
 							# Always allow views of templates, boxes, views
 
-	unless ($Site) { &error($dbh,"","",&printlang("Site info not found","check_status")); }
+	unless ($Site) { &error($dbh,"","",&printlang("Site info not found in check_status","check_status")); }
 	return 1 if ($action eq "view" && ( $table =~ /view|box|template/i ));
 	return 1 if (lc($Person->{person_status}) eq "admin");	# Admin always has permission
 	return 1 if ($Site->{cron} );				# Always allow cron
@@ -601,7 +603,7 @@ sub output_record {
   if ($diag>9) { print "Output Record<br>"; }
 
 	my $vars = (); if (ref $query eq "CGI") { $vars = $query->Vars; }
-	my $output = "";
+
 
 	# Identify record to output																									# Check Request
 	$table ||= $vars->{table}; die "Table not specified in output record" unless ($table);			#   - table
@@ -641,6 +643,39 @@ sub output_record {
 				qq|</h1> |.$record->{$table."_description"}.
 				qq|<admin $table,|.$record->{$table."_id"}.qq|>|;
 	}
+
+  # Temporary placement for now - Insert award data into badges for individuals, replacing  <award>
+  # Format:  site_url/badge/badgeid/authorid  (rewrites to site_url/cgi-bin/page.cgi?badge=badgeid&data=authorid)
+  my $replace;
+  if ($table eq "badge") {
+		if ($vars->{data}) {
+
+			# Find the author
+			my $author = &db_get_record($dbh,"author",{author_id=>$vars->{data}}) ||
+											&db_get_record($dbh,"author",{author_url=>$vars->{data}}) ||
+											&db_get_record($dbh,"author",{author_email=>$vars->{data}}) ||
+											&db_get_record($dbh,"author",{author_name=>$vars->{data}}) ||
+											&db_get_record($dbh,"author",{author_phone=>$vars->{data}});		# Tries a few things to find the author
+
+
+			# Find the badge awarded to the author
+			if ($author) {
+				my $graph_item = &graph_item("badge",$id_number,"author",$author->{author_id});
+				if ($graph_item) {
+					$replace .= sprintf(qq|<h2>Awarded To:</h2><h1>%s</h1><h3>%s<br/>%s</h3>|,
+						$author->{author_name},$author->{author_url},$author->{author_email},$graph_item,$graph_item);
+					if ($graph_item->{graph_typeval}) {
+						$replace .= sprintf(qq|<p><i>for</i></p><h3><a href="%s">%s</a></h3>|,$graph_item->{graph_typeval},$graph_item->{graph_typeval});
+					}
+				} else {
+					$replace .= sprintf("This badge has <b>not</b> been awarded to %s (%s).",$author->{author_name},$author->{author_id});
+				}
+			} else {
+				$replace .= sprintf("Looked for author number %s but could not find them.",$vars->{data});
+			}
+		}
+		$record->{page_content} =~ s/<award>/$replace/mig;
+  }
 
 	# Define geader and footer templates
 	$header_template = $record->{page_header} || lc($format) . "_header";					# Add headers and footers
@@ -808,6 +843,8 @@ sub publish_page {
 
 
 
+
+
 								# Remove CGI Headers
 
 		my $hdr9 = 'Content-type:text/html';
@@ -815,6 +852,12 @@ sub publish_page {
 		my $hdr1 = 'Content-type: text/html; charset=utf-8';
 		wp->{page_content} =~ s/($hdr0|$hdr1|$hdr9)//sig;
 
+
+    if ($Site->{st_urlf} eq '../') {     # Correct for relative URL, needed for cron print
+	#	   use Cwd 'abs_path';
+	#	   $Site->{st_urlf} = abs_path($0);
+  #     $Site->{st_urlf} =~ s/cgi-bin\/admin.cgi/$1/;
+		}
 
 
 								# Print Page
@@ -825,6 +868,7 @@ sub publish_page {
 
 
 		print "Publishing to ",$pgfile,$LF;
+		&log_cron(1,sprintf("Page published to %s",$pgfile));
 
 		unless (open PSITE, ">$pgfile") { &publish_error($page_id,qq|Cannot open ".$wp->{page_title}."($page_id) $pgfile : $! $LF $LF|); exit; }
 		unless (print PSITE $wp->{page_content}) { &publish_error($page_id,qq| Cannot print to ".$wp->{page_title}."($page_id) $pgfile : $!  $LF $LF|); close PSITE; exit; }
@@ -874,16 +918,11 @@ sub publish_page {
 sub publish_error {
 
   my ($pg,$err) = @_;
-  my $LF;
-  if ($Site->{cron} ) {
-     $LF = "\n";
-  } else {
-     print "Publish Error: Page $pg","<br/>\n",$err,"<br/>\n";
+  my $LF = "<br>";
+  if ($Site->{cron} ) { $LF = "\n"; }
 
-  }
-
-
-	&send_email("stephen\@downes.ca","stephen\@downes.ca","Publish Error: Page $pg",$err,'htm');
+  &log_cron(0,sprintf("Publish Error: Page %s $LF    %s",$pg,$err));
+  printf("Publish Error: Page %s $LF    %s",$pg,$err);
 
 }
 	# -------  Publish badge --------------------------------------------------------
@@ -1620,13 +1659,15 @@ sub format_record {
 
 	&make_images(\$view_text,$table,$id_number,$filldata);							# Images
 
-	&make_enclosures(\$view_text,$table,$id_number,$filldata);						# Enclosures
+	&make_enclosures(\$view_text,$table,$id_number,$filldata);					# Enclosures
 
 	&make_author(\$view_text,$table,$id_number,$filldata);							# Author
 
 	&make_hits(\$view_text,$table,$id_number,$filldata);								# Hits
 
-	&make_status_buttons(\$view_text,$table,$id_number,$filldata);							# Buttons
+	&make_status_buttons(\$view_text,$table,$id_number,$filldata);			# Buttons
+
+	&make_badges(\$view_text,$table,$id_number,$filldata);												# Badges
 
 
 	if ($record_format =~ /opml/) { $view_text =~ s/&/&amp;/g; }
@@ -2158,6 +2199,7 @@ sub make_status_buttons {
 
 	my ($text_ptr,$table,$id,$filldata) = @_;
 
+
 	return unless (defined $text_ptr);
 
 	my $count=0;
@@ -2197,6 +2239,106 @@ sub make_status_buttons {
 	}
 
 
+}
+
+# -------  Make Badges -------------------------------------------------------------
+#
+
+sub make_badges {
+
+	my ($text_ptr,$table,$id,$filldata) = @_;
+
+
+	#&admin_only();
+#print "Content-type: text/html\n\n";
+	while ($$text_ptr =~ /<badges>/sig) {
+		my $autotext = $1;
+
+		my $replace = "";
+		$count++; last if ($count > 100);			# Prevent infinite loop
+    unless ($filldata->{$table."_".$autotext}) { $filldata->{$table."_".$autotext} = 0; }
+
+    my $i = $icons->{$autotext}->[$filldata->{$table."_".$autotext}];
+  #  next unless $i;
+
+    if ($Person->{person_status} eq "admin") { 			# Admin Only
+    $replace = qq|
+      <script>
+		    \$(document).ready(function(){
+
+		    \$("#badgeButton").click(function(){
+		        \$("#award-badge").toggle();
+		    });
+
+			 	\$("#award-badge-form").submit( function(e) {
+					 e.preventDefault();
+					 var url = "$Site->{st_cgi}api.cgi?cmd=award_badge&"
+						 + "badge_table=" + \$("input[name=badge_table]").val()
+						 + "&badge_table_id=" + \$("input[name=badge_table_id]").val()
+						  + "&badge_id=" + \$("#badge_id").val();
+					 alert(url);
+					 \$("#badge-result").load(url, function(response, status, xhr) {
+							if (status == "error") {
+									var msg = "Sorry but there was an error: ";
+									alert(msg + xhr.status + " " + xhr.statusText);
+								}
+							});
+					 return 0;
+					});
+				});
+			</script>
+			<button id="badgeButton" style="height:2em;"><i class="fa fa-award"></i></button>
+			<div id="award-badge" style="display:none;border:solid black 0.5px;padding:0.2em;">
+				<p>Award a Badge</p>
+				<p><form id="award-badge-form">
+				Select a badge:
+				<input type="hidden" name="badge_table" value="$table">
+				<input type="hidden" name="badge_table_id" value="[*|.$table.qq|_id*]">|.
+				&get_options($dbh,"badge",$vars->{feed},&printlang("All Badges")).qq|
+				<input type="submit" value="Award">
+				</form>
+				<div id="badge-result"></div>
+			</div>
+			|;
+		} else {
+	     $replace = "";
+	  }
+
+		$$text_ptr =~ s/<badges>/$replace/;
+	}
+
+}
+
+sub get_options {
+
+	my ($dbh,$table,$opted,$blank,$size,$width) = @_;
+	return "Table not specified in get_options" unless ($table);
+	$opted ||= "none";
+	my $titfield = $table."_title";
+	my $title = &printlang(ucfirst($table));
+	my $idfield = $table."_id";
+	$size ||= 15;
+	$width ||= 15;
+	my $output = "";
+	if ($table eq "feed") { $where = qq|WHERE feed_status = 'A'|; } else { $where = ""; }
+	my $sql = qq|SELECT $titfield,$idfield from $table $where ORDER BY $titfield|;
+
+	my $sth = $dbh -> prepare($sql);
+	$sth -> execute() or die $dbh->errstr;
+	while (my $ref = $sth -> fetchrow_hashref()) {
+		next unless ($ref->{$titfield});
+		my $selected="";
+		if ($opted eq $ref->{$idfield}) { $selected = " selected"; }
+		$output .= qq|    <option value="$ref->{$idfield}"$selected>$ref->{$titfield}</option>\n|;
+	}
+
+	if ($output) {
+		$output = qq|<select name="$idfield" id="$idfield" style="width:|.$width.qq|em;" class="viewer-select">
+    <option value="none" selected>$blank</option>
+		$output</select>
+		|;
+	}
+	return $output;
 }
 
 	# -------  Make Next -------------------------------------------------------------
@@ -2378,6 +2520,7 @@ sub make_keylist {
 			$script->{search} =~ s/'//; $connection =~ s/'//;
 
 			my $keylistsql = qq|SELECT * FROM $script->{keytable} WHERE $klid = '$connection'|;
+			if ($script->{type}) { $keylistsql .= " AND ".$script->{keytable}."_type = '$script->{type}'"; }
 			if ($script->{search}) {
 				my $descfield = $script->{keytable}."_description";
 				my $catfield = $script->{keytable}."_category";
@@ -2797,7 +2940,7 @@ sub make_images {
 
 	my ($text_ptr,$table,$id,$filldata) = @_;
 
-   	return 1 unless ($$text_ptr =~ /<image (.*?)>/i);
+  return 1 unless ($$text_ptr =~ /<image (.*?)>/i);
 	while ($$text_ptr =~ /<image (.*?)>/ig) {
 
 		my $autocontent = $1; my $replace = ""; my $style = "";
@@ -2812,14 +2955,17 @@ sub make_images {
 		else { $typeval = autocontent; }
 
 
-		if ($autocontent eq "icon") { $replace =  &make_icon($table,$id,$filldata)."<p>";
-
-
-		} else { $replace =  &make_display($table,$id,$autocontent,$style,$filldata)."<p>";
-
-
-		}
-
+		if ($autocontent eq "icon") { $replace =  &make_icon($table,$id,$filldata)."<p>";	}
+		elsif ($autocontent eq "display") { $replace =  &make_display($table,$id,$autocontent,$style,$filldata)."<p>"; }
+		else {
+			my $imagefile = &item_images($table,$id,"largest");
+			my $imlink = $imagefile->{file_link} || $filldata->{$table."_link"};
+			if ($imagefile->{file_dirname}) {
+				$replace =  qq|<div class="image_realsize">
+				<a href="$imlink"><img src="<st_url>$imagefile->{file_dirname}"
+				alt="$imagefile->{file_dirname}"></a></div>|;
+			}
+	  }
 
 		$$text_ptr =~ s/\Q<image $autocontent>\E/$replace/;
 
@@ -4186,7 +4332,7 @@ sub admin_frame {
 	  <body>
 
 	   <div class="container">
-	   <!-- Generated Content Area -->
+	   <!-- Generated Content Area -->tw_tsecret
 	  |;
 
 
@@ -4259,14 +4405,22 @@ sub Tab_Left_Sidebar {
   my ($window) = @_;
 
  return qq|<!-- Open Sidebar Button --><li class="nav-item"><span class="nav-link" style="cursor:pointer" data-toggle="tab"
-onclick="openNav();"><i class="fa fa-database" style="color:green;font-size:1.2em;"></i></span></li><li
-class="nav-item"><span class="nav-link" style="cursor:pointer" data-toggle="tab"
-onclick="openDiv('|.$Site->{st_cgi}.qq|api.cgi','Reader','show','box','Start','Reader');"><img
-src="|.$Site->{st_url}.qq|assets/icons/grssicon.JPG" border=0 width=20 alt="Home" title="Home"></span></li>
-
-|;
+onclick="openNav();"><i class="fa fa-database" style="color:green;font-size:1.2em;"></i></span></li>|.&Tab_Reader_Modal();
 
 }
+
+sub Tab_Reader_Modal {
+
+   return sprintf(qq|<!-- Reader Tab -->
+	 <li class="nav-item">
+	   <span class="nav-link" style="cursor:pointer" data-toggle="modal" data-target="#readerModal"
+		     onclick="if (modalLoaded !== 1) { \$('#reader-modal-content').load('%sviewer.cgi?action=viewer&table=link'); modalLoaded = 1;}">
+	    <img src="%sassets/icons/grssicon.JPG" border=0 width=20 alt="Open Reader" title="Open Reader">
+	   </span>
+	 </li>|,$Site->{st_cgi},$Site->{st_url});
+
+}
+
 sub Tab_Right_Sidebar {
 	my ($window) = @_;
 
@@ -5552,25 +5706,32 @@ sub form_keylist {
 
   my $input_field;
   my $count = &db_count($dbh,$key);
-  if ($count < 1) {
+  if ($count < 50) {
 		my $titles = &db_get_column($dbh,$key,$key."_title");
-    $input_field = qq|<select id="|.$col.qq|" name="$col">\n|;
+    $input_field = qq|<select id="|.$col.qq|" name="$col">\n<option value="">Add $key_title</option>\n|;
     foreach my $t (@$titles) {  $input_field .= qq|<option value="$t">$t</option>\n|; }
-    $input_field .= qq|<select><br>\n|;
+    $input_field .= qq|</select>\n|;
   } else {
     $input_field = qq|<input type="text" class="empty-after" placeholder="Add $key_title" id="|.$col.qq|" style="width:|.$size.qq|em;max-width:100%;">|;
   }
 
 	return qq|
-		<div><span id="|.$col.qq|_liveupdate">$keylist_text</span>
-		$input_field
-		<span id="|.$col.qq|_button"><button>Update</button></span>
-		</div>
+		<div style="border-top:solid lightgrey 1px;padding-bottom:0.5em;" >
+      <div>
+         <div id="keylist-title" style="float:left;border:solid white 1px;width:5em;">$key_title</div>
+         <div id="|.$col.qq|_liveupdate" style="margin-left:2em;" >$keylist_text</div>
+      </div>
+      <div id="keylist-input-field" style="margin-left:5em;">
+		    $input_field
+        <span id="|.$col.qq|_button"  style="line-heinght:100%;" ><button type="button" class="btn btn-outline-secondary btn-sm" >Update</button></span>
+      </div>
+    </div>
+
+
 
 
 		<script>
 		\$(document).ready(function(){
-			\$('#|.$col.qq|_button').hide();
 			\$('#|.$col.qq|').click(function() { onclick_function("$col","persist");  });
 			\$('#|.$col.qq|_button').click(function(){
 				var url = "$url";
@@ -5578,8 +5739,6 @@ sub form_keylist {
 				submit_function(url,"$table","$id","$col",content,"keylist");
 				var previewUrl = url+"?cmd=show&table=$table&id=$id&format=summary";
 				\$('#Preview').load(previewUrl);
-				\$('#|.$col.qq|').text("");
-
 			});
 		});
 		</script>
@@ -6611,9 +6770,15 @@ sub form_publish {
 
 	my ($table,$id,$col,$value,$fieldsize,$advice) = @_;
   my $url = $Site->{st_cgi}."api.cgi";
+  my @accounts;
+
+# Badges
+  if ($table eq "badge") { @accounts = qw(Badgr); }
+  else {  @accounts = qw(Web Twitter Mastodon Facebook RSS JSON); }
 
 	# List of supported social media sites
-	my @accounts = qw(Web Twitter Mastodon Facebook RSS JSON);
+
+
 										# Future work - get this from the list of accounts
 	# Set up return content
 	my $return_text = qq|
@@ -8567,6 +8732,17 @@ sub graph_list {
 
 }
 
+  # ---------- graph_item -----------------------------------------------
+  # Returns the graph record given both tables and both ids (used to find the typeval value)
+sub graph_item {
+	my ($t1,$v1,$t2,$v2) = @_;
+
+  my $graph_item = &db_get_record($dbh,"graph",{graph_tableone=>$t1,graph_idone=>$v1,graph_tabletwo=>$t2,graph_idtwo=>$v2});
+  unless ($graph_item) { $graph_item = &db_get_record($dbh,"graph",{graph_tableone=>$t2,graph_idone=>$v2,graph_tabletwo=>$t1,graph_idtwo=>$v1}); }
+  return $graph_item;
+}
+
+
 	# -------   Create Graph Table ---------------------------------------------------------
 	#
 sub create_table_graph {
@@ -8759,9 +8935,17 @@ sub autodates {
 		&escape_hatch();
 		my $script = {}; &parse_keystring($script,$autocontent);
 
-		my $time = $script->{time} || time;					# Date / time from record (in epoch format)
-		if ($time eq "now") { $time = time; }
+		my $time = $script->{time} || $script->{date} || time;					# Date / time from record (in epoch format)
+		if (lc($time) eq "now") { $time = time; }
 		my $tz = $script->{timezone} || $Site->{st_timezone};			# Allows input to specify timezone
+
+		if ($script->{input} eq "date") {												# Convert input-style date to epoch (for eg. post_pub_date)
+			my ($y,$m,$d) = split /\//,$time;   # 2018/11/14
+			use DateTime;
+			my $dt = DateTime->new( year => $y, month => $m, day => $d, time_zone => $tz );
+			$time  = $dt->epoch;
+    }
+
 		my $format = $script->{format} || "nice";				# Format
 
 		if ($format eq "nice") { $replace = &nice_date($time,"day",$tz);	}
@@ -9461,6 +9645,7 @@ sub slurp {
 sub get_url {
 
 	my ($feedrecord,$feedid) = @_;
+
 	$feedrecord->{feedstring} = "";
 	my $cache = &feed_cache_filename($feedrecord->{feed_link},$Site->{feed_cache_dir});
 	my $editfeed = qq|<a href="$Site->{st_cgi}admin.cgi?action=edit&feed=$feedid">Edit Feed</a>|;
@@ -9506,7 +9691,7 @@ sub get_url {
 			$response->message. "<br>\n".
 			$server_endpoint. "<br>\n";
 
-		print $message;
+		&log_cron(0,$message);
 		#&send_email('stephen@downes.ca','stephen@downes.ca',"gRSShopper Harvest Failed",$message,"htm");
 		return;
 	}
@@ -9836,30 +10021,35 @@ sub log_status {
 }
 sub log_cron {
 
-	my ($log) = @_;
-	return unless ($Site->{cron});
+	my ($level,$log) = @_;
 
-											# Get the time
+  return unless ($Site->{context} eq "cron");
+  my $entry = sprintf("%s ", $Site->{context});
+
+	# Get the time
 	my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
 	my @wdays = qw|Sunday Monday Tuesday Wednesday Thursday Friday Saturday|;
 	my $weekday = @wdays[$wday];
 	if ($min < 10) { $min = "0".$min; }
 	if ($mday < 10) { $mday = "0".$mday; }
 	my $logtime="$mon/$mday $hour:$min ";
+	$entry .= "$logtime $log\n";
 
-	# Print Cron Jobs Log
-
-	unless ($log) { $log = $logtime . " No activities to report\n"; }
-	else { $log = $logtime . $log; }
-	my $cronfile = &get_cookie_base($Site->{st_url});
+  # Define Cron Log Location
+	my $cronfile = &get_cookie_base("b");
 	$cronfile =~ s/\./_/g;
 	my $cronlog = $Site->{data_dir} . $cronfile. "_cron.log";
-  #	open CRONLOG,">>$cronlog" or &send_email("stephen\@downes.ca","stephen\@downes.ca","Error Opening Cron Log File","Error opening Cron Logfile\n $cronfile: $!");
-  #	print CRONLOG $log  or &send_email("stephen\@downes.ca","stephen\@downes.ca","Error Printing to Cron Log","Error printing Cron Log $cronfile : $! \nLog: $log");
-  #	close CRONLOG;
+
+	# Print Cron Jobs Log
+	open CRONLOG,">>$cronlog" or die "Error opening Cron Logfile\n $cronlog: $!";
+  print CRONLOG $entry  or die "Error printing Cron Log $cronlog : $! \nLog: $log";
+  close CRONLOG;
 	return 1;
 
 }
+
+
+
 sub log_view {
 	my ($dbh,$query,$logfile,$format) = @_;
 
@@ -9876,7 +10066,7 @@ sub log_view {
 	print "Content-type:text/html\n\n";
 	print "Retrieving $logfile <br>";
 	if ($logfile eq "cronlog") {
-		my $cronfile = &get_cookie_base($Site->{st_url});
+		my $cronfile = &get_cookie_base("d");
 		$cronfile =~ s/\./_/g;
 		my $cronlog = $Site->{data_dir} . $cronfile. "_cron.log";
 		if ($vars->{format} eq "tail") {
@@ -10228,7 +10418,7 @@ sub diag {
 	my ($score,$output) = @_;
 
 	if ($score <= $Site->{diag_level}) {
-		print $output;
+#		print $output;
 	}
 
 	return;
@@ -10976,9 +11166,9 @@ sub facebook_post {
 sub facebook_session {
 
 	my ($dbh) = @_;
-
+return;
 	#use Facebook::Graph;
-	use Net::Facebook::Oauth2;
+	# use Net::Facebook::Oauth2;
 
 
 									# Make sure we have an access token
@@ -11627,10 +11817,10 @@ package gRSShopper::Site;
   	my($class, $args) = @_;
    	my $self = bless({}, $class);
 
-	# Assign default values when Site created, eg. location of site configuration file multisite.txt
-	#   context =>	$context,
-	#   data_dir =>	'/var/www/cgi-bin/data/',
-	#   secure => 1,
+  	# Assign default values when Site created, eg. location of site configuration file multisite.txt
+  	#   context =>	$context,
+  	#   data_dir =>	'/var/www/cgi-bin/data/',
+  	#   secure => 1,
 
    	while (my ($ax,$ay) = each %$args) { $self->{$ax} = $ay; }
 
@@ -11639,32 +11829,27 @@ package gRSShopper::Site;
   	$self->{process} = time;
 
 
-	# Define Site home URL from $ENV data
-	# (Used to find database info in multisite.txt)
-  	$self->__home();
+	  # Define Site home URL from $ENV data
+  	# (Used to find database info in multisite.txt)
+    $self->__home();
 
 
-	unless ($self->{no_db}) {
 
-		# Find db info from multisite.txt
-		$self->__dbinfo();
-
-		$self->__db_connect();
-
-		unless ($self->{dbh}) { die "Cannot connect to site database"; }
-
-	}
+    # Find db info from multisite.txt
+  	unless ($self->{no_db}) {
+  		$self->__dbinfo();
+	  	$self->__db_connect();
+  		unless ($self->{dbh}) { die "Cannot connect to site database"; }
+  	}
 
 
 
 
 
- 	# Load language translation packages
- 	$self->__load_languages();
+   	# Load language translation packages
+   	$self->__load_languages();
 
-
-
- 	return $self;
+  	return $self;
   }
 
 
@@ -11682,19 +11867,27 @@ package gRSShopper::Site;
 	# Determine site URL from HTTP or Cron
   	my $numArgs = $#ARGV + 1;
 
+
   	# Determine site host for HTTP
   	if ($ENV{'HTTP_HOST'}) {
   		$self->{st_host} = $ENV{'HTTP_HOST'};
    		$self->{script} = $ENV{'SCRIPT_URI'};
-		unless ($self->{script}) {  $self->{script} = $http . $ENV{'SERVER_NAME'}.$ENV{'SCRIPT_NAME'}; }
+		  unless ($self->{script}) {  $self->{script} = $http . $ENV{'SERVER_NAME'}.$ENV{'SCRIPT_NAME'}; }
 
   	}
 
   	# Determine site host for cron
+		# Assumes directory structure is /htdocs/cgi-dir/data/multisite.txt
   	elsif ($numArgs > 1) {
-  		$self->{st_host} = $ARGV[0];
-		$self->{script} = "http://" . $ARGV[0] . "/cgi-bin/admin.cgi";
-
+			$self->{context} = "cron";
+			$self->{st_host} = $ARGV[0];			# Define Host
+			$self->{data_dir} = $ARGV[2];		  # For cron, define data dir relative to multisite.txt
+			$self->{data_dir} =~ s/multisite\.txt//;
+			$self->{st_cgif} = $self->{data_dir}; # For cron, define cgif dir relative to data dir
+			$self->{st_cgif} =~ s/data\///i;  # For cron, define page dir relative to cgi-dir
+			$self->{st_urlf} = $self->{st_cgif};
+			$self->{st_urlf} =~ s/cgi-bin\///i;
+		  $self->{script} = "http://" . $ARGV[0] . "/cgi-bin/admin.cgi";
   	}
 
   	# Or die
@@ -11703,16 +11896,16 @@ package gRSShopper::Site;
 
   	# Set derived URLs based on st_host
    	$self->{st_url} = $http . $self->{st_host} . "/";
-	$self->{st_cgi} = $self->{st_url} . "cgi-bin/";
+	  $self->{st_cgi} = $self->{st_url} . "cgi-bin/";
 
   	# Set cookie host
- 	$self->{co_host} = $self->{st_host};
+ 	  $self->{co_host} = $self->{st_host};
 
    	# Set Default Directories
-	# Assign or override defaults
-	$self->{site_language}  ||= 'en';
-	$self->{st_urlf}  ||= '../';
-	$self->{st_cgif}  ||= './';
+	  # Assign or override defaults
+	  $self->{site_language}  ||= 'en';
+	  $self->{st_urlf} ||= '../';
+	  $self->{st_cgif} ||= './';
 
   }
 
@@ -11732,6 +11925,7 @@ package gRSShopper::Site;
 
 	# Open the multisite configuration file,
 	# Initialize if file can't be found or opened
+
 
 
   	my $data_file = $self->{data_dir} . "multisite.txt";
@@ -11756,9 +11950,7 @@ package gRSShopper::Site;
 			  $self->{database}->{loc},
 			  $self->{database}->{usr},
 			  $self->{database}->{pwd},
-			  $self->{site_language},
-			  $self->{st_urlf},
-			  $self->{st_cgif} ) = split "\t",$line;
+			  $self->{site_language} ) = split "\t",$line;
 			$url_located = 1;
 			last;
 		}
@@ -12564,7 +12756,8 @@ package gRSShopper::Person;
 
 			# Import values from call
 	  	foreach ( keys %args ) { $self->{$_} = $args{$_};
-				#print $_;
+        #print "New record: $class \n";
+				#printf("%s = %s\n",$self->{$_},$args{$_});
 			}
 
 			# Set Record Type
@@ -12851,19 +13044,7 @@ package gRSShopper::Person;
 	  	my $self = shift;
 	   	print $self->to_string(), "\n";
 	  }
-		# -------  Conditional print -------------------------------------------------------
-	sub diag {
 
-		# $diag_level set at top
-
-		my ($self,$score,$output) = @_;
-	  return unless($self->{diag_level});
-		if ($score <= $self->{diag_level}) {
-			print $output;
-		}
-
-		return;
-	}
 	 1;
 
 
@@ -13144,6 +13325,8 @@ package gRSShopper::Blockchain;
 	# :param amount: <int> Amount
 	# :return: <int> The index of the Block that will hold this transaction
 
+
+
 	sub new_transaction {
 
      my ($self,$sender,$recipient,$amount) = @_;
@@ -13324,3 +13507,240 @@ package gRSShopper::Blockchain;
 
 
 1;
+
+
+package gRSShopper::Badgr;
+
+  use strict;
+  use warnings;
+	use HTTP::Request::Common qw(POST);
+	use LWP::UserAgent;
+	use JSON qw(encode_json decode_json);
+
+  our $VERSION = "1.00";
+
+
+  sub new {
+
+  	my($class, $args) = @_;
+   	my $self = bless({}, $class);
+
+   	while (my ($ax,$ay) = each %$args) {$self->{$ax} = $ay;}
+    $self->generate_access_token();
+   	return $self;
+  }
+
+	sub generate_access_token {
+
+		my ($self) = @_;
+    my $access_token_url = $self->{badgr_url}."/o/token";
+		my $ua = LWP::UserAgent->new;
+		my $req = POST $access_token_url,[ username => $self->{badgr_account}, password => $self->{badgr_password} ];
+		my $response = $ua->request($req);
+		if ($response->is_success) {
+			 my $hashref  = decode_json $response->decoded_content;
+			 $self->{access_token} =  $hashref->{access_token};
+			 $self->{refresh_token} =  $hashref->{refresh_token};
+		}
+		else {
+		   print STDERR $response->status_line, "\n";
+		}
+	}
+
+
+	# Creates an issuer on Badgr
+  # using site data in $Site
+  # Returns issuer ID and stores in Badgr object
+
+	sub create_issuer {
+
+		my ($self,$issuer) = @_;
+
+		# Create Request JSON
+		my $issuer_json = qq|{
+	   "name": "$issuer->{name}",
+	 	 "email": "$issuer->{email}",
+	 	 "description": "$issuer->{description}",
+	 	 "url": "$issuer->{url}"
+	 }|;
+
+	  # Format Request
+    my $create_issuer_url = $self->{badgr_url}."/v2/issuers";
+	  my $header = ['Authorization' => 'Bearer '.$self->{access_token},"Content-Type" => "application/json"];
+		my $req = HTTP::Request->new('POST', $create_issuer_url, $header, $issuer);
+
+		# Make Request
+    my $ua = LWP::UserAgent->new;
+		my $response = $ua->request($req);
+		if ($response->is_success) {
+
+		# Process Response
+		my $hashref  = decode_json $response->decoded_content;
+			foreach my $r (@{$hashref->{result}}) {
+			   if ($r->{entityId}) {
+
+		  			# Process Successful Response, or
+            $self->{badgr_issuerid} = $r->{entityId};
+
+						# Report Request Error
+         } else {
+					   print "Failed to create an EntityId for Issuer<p>"
+         }
+			}
+
+		}
+		else {
+
+			 # Report Connection Error
+			 print STDERR $response->status_line, "\n";
+		}
+
+
+	}
+
+  # Publishes a badge on Badgr
+  # using data from a previously defined badge entity $badge
+  # Returns the newly created badge
+
+  sub create_badge {
+
+		my ($self,$badge) = @_;
+		my $req = POST $self->{badgrapi},[ username => $self->{badgruserid}, password => $self->{badgrpwd} ];
+
+    die "Cannot creat a badge without an issuer ID" unless ($self->{badgr_issuerid});
+
+    # Define Badge JSON
+    my $badge_json = qq|
+		 {"criteriaUrl":"$badge->{criteriaUrl}",
+			"issuer":"$self->{badgr_issuerid}",
+			"name":"$badge->{badge_title}",
+			"image":"$badge->{image}",
+			"description":"$badge->{badge_description}",
+			"alignments": [
+				{"targetName":"Testing",
+				 	"targetUrl":"$badge->{criteriaUrl}",
+					"targetDescription":"$badge->{badge_description}",
+					"targetFramework":"No framework",
+					"targetCode":"No code"}
+			 ]}|;
+
+
+		# Create Request
+	  my $uri = $self->{badgr_url}."/v2/badgeclasses";
+	  my $header = ['Authorization' => 'Bearer '.$self->{access_token},"Content-Type" => "application/json",'username' => $self->{badgruserid}];
+		my $data = {foo => 'bar', baz => 'quux'};
+		my $req = HTTP::Request->new('POST', $uri, $header, $badge_json);
+
+    # Execute Request
+    my $ua = LWP::UserAgent->new;
+	  my $response = $ua->request($req);
+		if ($response->is_success) {
+			my $hashref  = decode_json $response->decoded_content;
+			foreach my $r (@{$hashref->{result}}) {
+				 if ($r->{entityId}) {
+						$self->{badgr_issuerid} = $r->{entityId};
+            printf("Created badge %s <br>",$r->{entityId});
+            return $r; # Return the newly created badge
+				 } else {
+						 print "Failed to create an EntityId for Issuer<p>"
+				 }
+			}
+
+		}
+		else {
+			 print STDERR $response->status_line, "\n";
+		}
+
+
+	}
+
+
+	# Award a badge $badge to a recipient $recipient on Badgr
+  # using data from a previously defined badge entity $badge
+  # Returns the newly created badge
+
+	sub award_badge {
+print "Awarding badge<p>";
+
+		my ($self,$badge,$recipient,$evidence) = @_;
+
+    # Define recipient identity
+    my $recipient_identity;
+    my $recipient_type;
+    my $recipient_hash;
+    if ($recipient->{email}) { $recipient_type = "email"; $recipient_identity = $recipient->{email}; }
+    elsif ($recipient->{url}) { $recipient_type = "url"; $recipient_identity = $recipient->{url}; }
+		elsif ($recipient->{phone}) { $recipient_type = "telephone"; $recipient_identity = $recipient->{phone}; }
+		die "Badge recipient not correctly specified in award_badge()" unless ($recipient_identity);
+		my $recipient_plaintext_identity = $recipient_identity;
+print "To: ". $recipient_plaintext_identity."<p>";
+		# Hash recipient identity if requested
+ 		if ($recipient->{hash}) {
+			use Digest::SHA qw(sha512_base64);
+			my $recipient_identity = sha512_base64($recipient_plaintext_identity);
+			$recipient_hash=qq|"hashed": true,|;
+		} else {
+			$recipient_hash=qq|"hashed": false,|;
+		}
+print "OK";
+    # Create recipient JSON
+		my $recipient_json = qq|"recipient": {
+        "identity": "$recipient_identity",
+        "type": "$recipient_type",
+        $recipient_hash
+        "plaintextIdentity": "$recipient_plaintext_identity"
+      },|;
+
+		die "Evidence URL not correctly specified in award_badge()" unless ($evidence->{url});
+		$evidence->{narrative} ||= "None.";
+
+    # Create request JSON
+		my $request_json = qq|
+    {
+      $recipient_json
+      "notify":true,
+      "evidence":[
+        {
+          "url":"$evidence->{url}",
+          "narrative":"$evidence->{narrative}"
+        }
+      ]
+    }
+		|;
+
+print $request_json;
+		# Create request
+		my $uri = $self->{badgr_url}."/v2/badgeclasses/".$badge->{badge_entityid}."/assertions";
+		my $header = ['Authorization' => 'Bearer '.$self->{access_token},"Content-Type" => "application/json"];
+		my $req = HTTP::Request->new('POST', $uri, $header, $request_json) or die "Error formating request: $!";
+print "$uri";
+print "<p>";
+#print $req->as_string;
+    # Execute Request
+		my $ua = LWP::UserAgent->new;
+		my $response = $ua->request($req)  or die "Error sending request: $!";
+print $response->as_string;
+		if ($response->is_success) {
+			my $hashref  = decode_json $response->decoded_content;
+
+			foreach my $r (@{$hashref->{result}}) {
+				 if ($r->{entityId}) {
+						$self->{badgr_issuerid} = $r->{entityId};
+						print "Awarded badge %s to %s <br>";
+						return $r; # Return the newly created badge
+				 } else {
+						 print "Failed to award badge<p>"
+				 }
+			}
+
+		}
+		else {
+			 print STDERR $response->status_line, "\n";
+		}
+
+
+	}
+
+
+
+ 1;

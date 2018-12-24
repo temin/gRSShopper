@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-
+#print "Content-type:text/html\n\n";
 #    gRSShopper 0.7  Page  0.7  -- gRSShopper administration module
 #    26 April 2017 - Stephen Downes
 
@@ -70,7 +70,13 @@
 my $format ||= $vars->{format} || "viewer";		# Default to Viewer
 my $table = $vars->{table} || "link";
 
-&viewer($dbh,$query,$table,$format);
+if ($vars->{viewer_options}) {
+   &viewer_body($dbh,$query,$table,$format);
+} else {
+	&viewer_frame($dbh,$query,$table,$format);
+}
+
+
 
 if ($dbh) { $dbh->disconnect; }			# Close Database and Exit
 exit;
@@ -84,10 +90,62 @@ exit;
 #
 #-------------------------------------------------------------------------------
 
+sub viewer_frame {
+
+	# Print Header
+	print "Content-type: text/html\n\n";
+	my $url = $Site->{st_cgi}."viewer.cgi?viewer_options=yes&link_status=Fresh";
+	print qq|<html>
+		<head>
+		<title>$Site->{st_name} @{[&printlang("Viewer")]}</title>
+		<link rel="stylesheet" href="|.$Site->{st_url}.qq|assets/css/grsshopper_viewer.css">
+		<script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
+		<script src="$Site->{st_url}assets/js/grsshopper_viewer.js"></script>
+		<!-- Font-Awesome -->
+		<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.5.0/css/all.css" integrity="sha384-B4dIYHKNBt8Bc12p+WXckhzcICo0wtJAoU8YZTY5qE0Id1GSseTk6S+L3BlXeVIU" crossorigin="anonymous">
+
+		</head>
+		<body style="height:100%;margin:0;padding:20px;">
+		<div id="viewer-main" style="height:100%;margin:0;;padding:20px;">|.
+		&viewer_home_button().
+		&viewer_controls($dbh,$query,$table,$format).
+		qq|<div id="viewer-body"></div>
+		<script>
+		\$( "#viewer-body" ).load( "$url" );
+		</script>
+		</body></html>|;
+
+}
+
+sub viewer_home_button {
+
+  return sprintf(qq|
+
+     <span id="viewer-home-button" class="nav-link" style="cursor:pointer;float:left;" data-target="#readerModal">
+		 <img src="%sassets/icons/grssicon.JPG" border=0 width=20 alt="Home" title="Home">
+		 </span>
+		 <script>
+			 \$(document).ready(function() {
+				 \$("#viewer-home-button").click(function() {
+						 \$('#viewer-main')
+								.html('<img src="%sassets/images/loader.gif" />')
+								.load('%sstart.html');
+				 });
+			 });
+		 </script>
+  |,$Site->{st_url},$Site->{st_url},$Site->{st_url});
 
 
 
-sub viewer {
+
+
+}
+
+
+
+
+
+sub viewer_body {
 
 	my ($dbh,$query,$table,$format) = @_;
 	my $vars = $query->Vars;
@@ -95,21 +153,7 @@ sub viewer {
 	$vars->{status} ||= "Unread";
 	print "Content-type: text/html\n\n";
 
-									# Print Header
 
-
-	print qq|<html>
-		<head>
-		<title>$Site->{st_name} @{[&printlang("Viewer")]}</title>
-		<script src="$Site->{st_url}assets/js/jquery.js"></script>
-		<script src="$Site->{st_url}assets/js/grsshopper_viewer.js"></script>
-		<link rel="stylesheet" href="|.$Site->{st_url}.qq|assets/css/grsshopper_viewer.css">
-		<!-- Font-Awesome -->
-		<link rel="stylesheet" href="|.$Site->{st_url}.qq|assets/css/font-awesome.4.7.0.min.css">
-		<link rel="stylesheet" href="|.$Site->{st_url}.qq|assets/css/font-awesome.5.0.6.all.css">
-		</head>
-		<body style="height:100%;margin:0;">
-    <div style="height:100%;margin:0;">|;
 
 
 									# Generate Search Parameters
@@ -127,32 +171,38 @@ sub viewer {
 	}
 
 										# Feed
-	if ($vars->{feed} && ($vars->{feed} ne "none")) {
-		my @feedlist = split /\0/,$vars->{feed}; my @feed_arr;
+	if ($vars->{feed_id} && ($vars->{feed_id} ne "none")) {
+		my @feedlist = split /\0/,$vars->{feed_id}; my @feed_arr;
 		foreach my $f (@feedlist) { push @feed_arr,"link_feedid = '$f'"; }
 		my $feedl = join " OR ",@feed_arr;
 		push @where_arr, "($feedl)";
-		push @search_string,"Feed: $vars->{feed}";
+		push @search_string,"Feed: $vars->{feed_id}";
+	} else {
+		push @search_string,"all feeds";
 	}
 
 										# Section
-	if ($vars->{section} && $vars->{section} ne "none") {
-		push @where_arr, "(link_section = '$vars->{section}')";
-		push @search_string,"Section: $vars->{section}";
+	if ($vars->{feed_section} && $vars->{feed_section} ne "none") {
+		push @where_arr, "(link_section = '$vars->{feed_section}')";
+		push @search_string,"Section: $vars->{feed_section}";
+	}else {
+		push @search_string,"any section";
 	}
 
 										# Status
-	if ($vars->{status} && $vars->{status} ne "none") {
-    if ($vars->{status} eq "Unread") {
+	if ($vars->{link_status} && $vars->{link_status} ne "none"  && $vars->{link_status} ne "undefined") {
+    if ($vars->{link_status} eq "Unread") {
 			push @where_arr, "(link_read = 0)";
 			push @search_string,"Unread";
-		} elsif ($vars->{status} eq "Starred") {
+		} elsif ($vars->{link_status} eq "Starred") {
 			push @where_arr, "(link_star = 1)";
 			push @search_string,"Starred";
-		} else {
-			push @where_arr, "(link_status = '$vars->{status}')";
-      push @search_string,"Status: $vars->{status}";
+		} elsif ($vars->{link_status}) {
+			push @where_arr, "(link_status = '$vars->{link_status}')";
+      push @search_string,"Status: $vars->{link_status}";
 		}
+	}else {
+		push @search_string,"any status";
 	}
 
 
@@ -215,7 +265,7 @@ sub viewer {
 document.getElementById('pointer').value=index;
 document.getElementById('resource').value=larr[index];
 document.getElementById('rescounter').innerHTML=index+1;
-viewer_ajax_request(sitecgi+'page.cgi?$table='+larr[index]+'&format=viewer','$table',1);
+viewer_ajax_request(sitecgi+'page.cgi?$table='+larr[index]+'&format=viewer&force=yes','$table',1);
 </script>
 
 	|;
@@ -224,8 +274,7 @@ viewer_ajax_request(sitecgi+'page.cgi?$table='+larr[index]+'&format=viewer','$ta
 
 	# Print Viewer
 
-	print &viewer_controls($dbh,$query,$table,$format).
-    qq|$searchstring$jscr</div></body></html>|;
+	print qq|$searchstring$jscr</div></body></html>|;
 
 #	print $page->{content};
 
@@ -248,17 +297,42 @@ sub viewer_controls {
 
 
 	my $controls = qq|
-		<form method="post" action="viewer.cgi" style="margin:0;">
+		<form method="post" id="viewer-options" action="#" style="margin:0;">
     <input type="hidden" name="action" value="viewer">
     <input type="hidden" name="table" value="$table">|.
-		&get_optlist($dbh,"feed_section",$vars->{section},&printlang("All Sections")).
-		&get_optlist($dbh,"link_status",$vars->{status},&printlang("Any Status")).
-		&get_options($dbh,"feed",$vars->{feed},&printlang("All Feeds")).
-		&get_options($dbh,"topic",$vars->{topic},&printlang("All Topics")).
-		&get_optlist($dbh,"feed_genre",$vars->{genre},&printlang("All Genres")).
+		qq|Section |.&get_optlist($dbh,"feed_section",$vars->{section},&printlang("All Sections")).
+		qq|Status |.&get_optlist($dbh,"link_status",$vars->{status},&printlang("Any Status")).
+		qq|Feed |.&get_options($dbh,"feed",$vars->{feed},&printlang("All Feeds")).
+		qq|Topic |.&get_options($dbh,"topic",$vars->{topic},&printlang("All Topics")).
+		qq|Genre |.&get_optlist($dbh,"feed_genre",$vars->{genre},&printlang("All Genres")).
 		qq|
 		<input type="submit" class="viewer-submit" value="@{[&printlang("S U B M I T")]}">
 		</form>
+		<script>
+		\$( document ).ready(function() {
+
+			\$("#viewer-options").submit( function(e) {
+         e.preventDefault();
+				 var url = "$Site->{st_cgi}viewer.cgi?viewer_options=yes&"
+					 + "table=" + \$("input[name=table]").val()
+					 + "&action=" + \$("input[name=action]").val()
+					 + "&feed_id=" + \$("#feed_id").val()
+						+ "&link_status=" + \$("select[name=link_status]").val()
+						+ "&feed_section=" + \$("select[name=feed_section]").val()
+						+ "&topic=" + \$("select[name=topic]").val()
+						+ "&feed_genre=" + \$("select[name=feed_genre]").val();
+				 alert(url);
+				 \$("#viewer-body").load(url, function(response, status, xhr) {
+    if (status == "error") {
+        var msg = "Sorry but there was an error: ";
+        alert(msg + xhr.status + " " + xhr.statusText);
+      }
+});
+	       return 0;
+			});
+		});
+
+		</script>
 	|;
 
 	return $controls;
@@ -288,7 +362,7 @@ sub viewer_taskbar {
 		var sitecgi='$Site->{st_cgi}';
 		var pscr = '$post_scr';
 	</script>
-	<div style="text-align: center;clear:both;">
+	<div style="text-align: center;clear:both;margin-top:1em;background-color: lightgrey;padding-top:0.5em;padding-bottom:0.5em;">
 		<span style="float:left;">
 			<input type="button" id="button4" style="height:2em; width:5em;" onclick="viewer_increment(sitecgi,table,4,last)" value=" << "/>
 			<input type="button" id="button2" style="height:2em; width:5em;" onclick="viewer_increment(sitecgi,table,2,last)" value=" < "/>
@@ -353,12 +427,12 @@ sub get_options {
 	}
 
 	if ($output) {
-		$output = qq|<select name="$table" style="width:|.$width.qq|em;" class="viewer-select">
+		$output = qq|<select name="|.$table.qq|_id" style="width:|.$width.qq|em;" class="viewer-select">
     <option value="none" selected>$blank</option>
 		$output</select>
 		|;
 	}
-	return $output;
+	return $output."PPPPPPPPPPPPPPPPPPPPPPPPPPPPP";
 }
 
 sub get_optlist {
@@ -382,7 +456,7 @@ sub get_optlist {
 	}
 
 	if ($output) {
-		$output = qq|<select name="$field" class="viewer-select">
+		$output = qq|<select name="$optlist" class="viewer-select">
 		<option value="none" selected>$blank</option>
 		$output
 		</select>

@@ -444,6 +444,141 @@ if ($vars->{cmd}) {
 		&write_text_file('version.txt',$version);
     exit;
 	}
+
+  # AWARD BADGE
+	if ($vars->{cmd} eq "award_badge") {
+
+		# Make sure the badge and the resource exist
+	  my $badgedata = &db_get_record($dbh,"badge",{badge_id=>$vars->{badge_id}});
+		unless ($badgedata) { printf("Badge %s does not exist.",$vars->{badge_id}); exit;}
+		my $evidata = &db_get_record($dbh,$vars->{badge_table},{$vars->{badge_table}."_id"=>$vars->{badge_table_id}});
+		unless ($evidata) { printf("%s %s does not exist.",$vars->{badge_table},$vars->{badge_table_id}); exit;}
+
+		# Find the author(s) of the resource
+    my @authors = &find_graph_of($vars->{badge_table},$vars->{badge_table_id},"author");
+		unless (@authors) {    # Could not find author assicuated with the resource itself, try feed maybe?
+    	my @feeds = &find_graph_of($vars->{badge_table},$vars->{badge_table_id},"feed");
+			foreach my $feed (@feeds) {    # Usually only one feed, but covering my bases
+			  my @feed_authors = &find_graph_of("feed",$feed,"author");
+				if (@feed_authors) { push @authors,@feed_authors; }
+  		}
+ 		}
+
+		# Cannot award badge if there's nobody to award it to
+		unless (@authors) {
+			print "I could not find an author to award this badge to.";	exit;
+		}
+
+		# For each author...
+		my $author_names = "";
+		foreach my $author (@authors) {
+
+			# Get the author identifier
+			my $author_record =  &db_get_record($dbh,"author",{author_id=>$author});
+			my $author_identifier; my $identifiertype;
+			if ($author_record->{author_email}) { $author_identifier = $author_record->{author_email}; $identifiertype="email"; }
+			elsif ($author_record->{author_link}) { $author_identifier = $author_record->{author_link}; $identifiertype="url";  }
+			elsif ($author_record->{author_url}) { $author_identifier = $author_record->{author_url}; $identifiertype="url"; }
+			elsif ($author_record->{author_phone}) { $author_identifier = $author_record->{author_phone};$identifiertype="telephone";  }
+
+			# Option to edit author record if no identifier is found
+			unless ($author_identifier) {
+					printf("I found %s as the author of this resource, however ",$author_record->{author_name});
+					print "I need an email, url or phone number to identify this badge recipient. ";
+					printf(qq|<a href="#"	data-dismiss="modal" onclick="openDiv('%sapi.cgi',
+						'main','edit','author','%s','','Edit');">Edit</a> the author record and then award the badge|,
+						$Site->{st_cgi},$author_record->{author_id});
+					exit;
+			}
+			if ($author_names) { $author_names .= ", "; }
+			$author_names.=$author_record->{author_name}." (identified by $author_identifier)";
+
+			# Get the evidence URL
+			my $evidence_url = $evidata->{$vars->{badge_table}."_guid"} || $evidata->{$vars->{badge_table}."_link"} || $evidata->{$vars->{badge_table}."_url"};
+
+			# Award the badge
+
+			# Check to see if badge already awarded to this author, exit if so
+			my @found = &find_graph_of("badge",$vars->{badge_id},"author");
+			if (grep(/^$author$/i, @found)) { print "This badge has already been awarded to $author_identifier."; exit; }
+
+			# Associate the badge with the author and the link, graph_type is 'awarded' and graph_typeval is the evidence_url
+			&db_insert($dbh,$query,"graph",{
+				graph_tableone=>"badge", graph_idone=>$vars->{badge_id}, graph_tabletwo=>"author", graph_idtwo=>$author,
+				graph_creator=>$Person->{person_id}, graph_crdate=>time, graph_type=>"awarded",graph_typeval=>$evidence_url});
+			&db_insert($dbh,$query,"graph",{
+				graph_tableone=>"badge", graph_idone=>$vars->{badge_id}, graph_tabletwo=>$vars->{badge_table}, graph_idtwo=>$vars->{badge_table_id},
+				graph_creator=>$Person->{person_id}, graph_crdate=>time, graph_type=>"awarded",graph_typeval=>$author});
+
+			# Award on Badgr
+			our $Badgr = gRSShopper::Badgr->new({
+				badgr_url   => $Site->{badgr_url},
+				badgr_account		=>	$Site->{badgr_account},
+				badgr_password => $Site->{badgr_password},
+				badgr_issuerid => $Site->{badgr_issuerid},
+				secure => 1,							# Turns on SSH
+			});
+
+			unless ($evidence_url) { printf("There is no URL for the evidence data provided, %s",$evidata->{$vars->{badge_table}."_title"}); }
+				print qq|award_badge({badge_entityid=>$badgedata->{badge_badgrid},{$identifiertype=>$author_identifier},{url=>$evidence_url})|;
+			$Badgr->award_badge({badge_entityid=>$badgedata->{badge_badgrid}},{$identifiertype=>$author_identifier},{url=>$evidence_url});
+
+			# Send WebMention
+
+			my $lcontent = get($evidence_url);
+			if ($lcontent) {
+				my $endpoint = &find_webmention_endpoint($lcontent);
+				if ($endpoint) { &send_webmention($endpoint,$evidence_url,$Site->{st_url}."badge/".$vars->{badge_id}); }
+				else { print "Tried to send WebMention but couldn't find an endpoint for $evidence_url <br>."}
+			} else { print "Tried to send WebMention but the evidence link is not responding."; }
+
+			# Record in Blockchain
+
+			# Load Blockchain Module
+			use File::Basename qw(dirname);
+			use Cwd  qw(abs_path);
+			use lib dirname(dirname abs_path $0) . '/cgi-bin/modules/Blockchain/lib';
+			use Blockchain;
+
+      # Create Transaction
+			my $blockchain = new Blockchain;
+		  delete $vars->{cmd};
+			my $assertion = {
+						sender=>{
+							url=>$Site->{st_url},
+							email=>$Site->{st_email},
+							name=>$Site->{st_name}
+						},
+						badge=>{
+								badge_entityid=>$badgedata->{badge_badgrid},
+								badge_url=>$Site->{st_url}."badge/".$vars->{badge_id}."/".$author_record->{author_id}
+						},
+						recipient=>{
+								name=>$author_record->{author_name},
+								$identifiertype=>$author_identifier
+						},
+						evidence=>{
+								url=>$evidence_url
+						}
+			};
+		  my $index = $blockchain->new_transaction($assertion);
+			# I can store anything I want in this blockchain
+
+			print "Saved transaction number $index and will be added to blockchain.<br>";
+			# If index is high enough, mine a new block
+			print "Content-type: tet/html\n\n";
+			print "mining from api";		
+			if ($index>5) { $blockchain->mine(); print "New block mined.<br>"; }
+			&blockchain_close($blockchain);
+
+
+		}
+
+
+		print "Awarded Badge $vars->{badge_id} to $author_names.<br>";
+		exit;
+
+	}
 	#----------------------------------------------------------------------------------------------------------
 	#
   #   gRSShopper Blockchain APIs (because I can't resist playing)
@@ -1496,6 +1631,59 @@ sub api_publish {
 
 		}
 
+	elsif ($vars->{value} =~ /badgr/i) {
+
+		# Find the task(s) associated with this badge
+    my @keylist = &find_graph_of("badge",$id,"task");
+    unless ($Site->{badgr_issuerid}) { print "You need to set up your Badgr account first"; exit;}
+    unless (@keylist) { print "You need to associate at least one task with this badge before you can publish it"; exit;}
+    foreach my $t (@keylist) {
+			my $keyname = &get_key_name("task",$t);
+			print "$t $keyname<p>";
+		}
+
+    my $badge = &db_get_record($dbh,"badge",{badge_id=>$id});
+		print "Sending to Badgr<br>";
+
+		# Initialize Badgr
+		our $Badgr = gRSShopper::Badgr->new({
+			badgr_url   => $Site->{badgr_url},
+			badgr_account		=>	$Site->{badgr_account},
+			badgr_password => $Site->{badgr_password},
+			badgr_issuerid => $Site->{badgr_issuerid},
+			secure => 1,							# Turns on SSH
+		});
+
+    # Format the badge image
+		my $filerecord = &item_images("badge",$id,"smallest");
+		my $imagestr;
+		if ($filerecord->{file_mime} eq "image/png") {
+			my $imgfilename =  $Site->{st_urlf}.$filerecord->{file_dirname};
+    	use File::Slurp;
+    	use MIME::Base64 qw|encode_base64|;
+    	$imagestr = encode_base64( read_file( $imgfilename ) );
+    	$imagestr =~ s/\n//g;$imagestr =~ s/\n//g;						# because they get inserted somehow and Badgr chokes on them
+    	$imagestr = "data:image/png;base64,".$imagestr;
+		} else {
+			print "Badgr requires that image files be PNG format.";
+		}
+
+
+	  # Create the Badge
+		my $saved_badge = $Badgr->create_badge({
+			criteriaUrl => $Site->{st_url}."badge/".$id,
+      badge_title => $badge->{badge_title},
+      badge_description => $badge->{badge_description},
+			image => $imagestr,
+    });
+
+    print "Saved badge ID: ",$saved_badge->{entityId},"<p>";
+    &db_update($dbh,"badge",{badge_badgrid=>$saved_badge->{entityId},
+			badge_openbadgeid=>$saved_badge->{openBadgeId}},$id);   #Saves entityId to badge record
+
+		exit;
+
+	}
 
 		elsif ($vars->{value} =~ /web/i) {
 
@@ -1537,15 +1725,11 @@ sub api_publish {
 				if ($lid) {	&graph_add($table,$id,"link",$lid,"reference",""); }
 
 				# Look for webmention endpoint
-				my $endpoint = "";
-
-				my @bodylinks = $lcontent =~ /<a (.*?)>/gis;
-				foreach my $bl (@bodylinks) {	if ($bl =~ m/rel="webmention"/is) { $bl =~ m/href="(.*?)"/is; $endpoint=$1; last; }	}
-
-			  my @headlinks = $lcontent =~ /<link (.*?)>/gis;
-				foreach my $hl (@headlinks) {	if ($hl =~ m/rel="webmention"/is) { $hl =~ m/href="(.*?)"/is; $endpoint=$1; last; }	}
-
+				my $endpoint = &find_webmention_endpoint($lcontent);
 				if ($endpoint) { &send_webmention($endpoint,$l,$Site->{st_url}.$table."/".$id); }
+
+
+
 			}
 
 			my $result = &db_update($dbh,$table, {$table."_web" => 1}, $id); # Prevent publishing twice
@@ -1570,6 +1754,19 @@ sub api_publish {
 
 }
 
+# Finds a WebMention wndpoint given the $lcontent of a web page
+sub find_webmention_endpoint {
+   my ($lcontent) = @_;
+	 my $endpoint = "";
+
+	 my @bodylinks = $lcontent =~ /<a (.*?)>/gis;
+	 foreach my $bl (@bodylinks) {	if ($bl =~ m/rel="webmention"/is) { $bl =~ m/href="(.*?)"/is; $endpoint=$1; last; }	}
+
+	 my @headlinks = $lcontent =~ /<link (.*?)>/gis;
+	 foreach my $hl (@headlinks) {	if ($hl =~ m/rel="webmention"/is) { $hl =~ m/href="(.*?)"/is; $endpoint=$1; last; }	}
+
+	 return $endpoint;
+}
 
 sub send_webmention {
 
