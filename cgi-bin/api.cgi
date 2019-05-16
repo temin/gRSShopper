@@ -1234,7 +1234,7 @@ sub api_page_publish {
   # VCard
   if ($vars->{table} =~ /vcard/i) {
 
-		use vCard;
+		use Text::vCard;
 
 		$Person->{person_work_email} ||= $Person->{person_email};
 		$Person->{person_home_email} ||= $Person->{person_email};
