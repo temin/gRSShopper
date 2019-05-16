@@ -3826,32 +3826,32 @@ print "$hn <p>\n\n";
 
 
 
-	sub mastodon {
-
-	    use Mastodon::Client;
-
-	    my $client = Mastodon::Client->new(
-	      instance        => $Site->{mas_instance},
-	      name            => 'gRSShopper',
-	      client_id       => $Site->{mas_cli_id},
-	      client_secret   => $Site->{mas_cli_secret},
-	      access_token    => $Site->{mas_acc_token},
-	      coerce_entities => 1,
-	    );
-
-	    $client->post_status('Posted to a Mastodon server! From gRSShopper.');
-	    $client->post_status('And now in secret...',
-	      { visibility => 'unlisted' }
-	    );
-
-	    # Streaming interface might change!
-	    my $listener = $client->stream( 'public' );
-	    $listener->on( update => sub {
-	      my ($listener, $status) = @_;
-	      printf "%s said: %s\n",
-	        $status->account->display_name,
-	        $status->content;
-	    });
-	    $listener->start;
-
-	}
+# 	sub mastodon {
+# 
+# 	    use Mastodon::Client;
+# 
+# 	    my $client = Mastodon::Client->new(
+# 	      instance        => $Site->{mas_instance},
+# 	      name            => 'gRSShopper',
+# 	      client_id       => $Site->{mas_cli_id},
+# 	      client_secret   => $Site->{mas_cli_secret},
+# 	      access_token    => $Site->{mas_acc_token},
+# 	      coerce_entities => 1,
+# 	    );
+# 
+# 	    $client->post_status('Posted to a Mastodon server! From gRSShopper.');
+# 	    $client->post_status('And now in secret...',
+# 	      { visibility => 'unlisted' }
+# 	    );
+# 
+# 	    # Streaming interface might change!
+# 	    my $listener = $client->stream( 'public' );
+# 	    $listener->on( update => sub {
+# 	      my ($listener, $status) = @_;
+# 	      printf "%s said: %s\n",
+# 	        $status->account->display_name,
+# 	        $status->content;
+# 	    });
+# 	    $listener->start;
+# 
+# 	}
