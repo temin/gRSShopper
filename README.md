@@ -18,24 +18,26 @@ Optional: Install Git to get/manage gRSShopper files. You can do the same by dow
 
 Additionaly you need to install following Perl modules:
 
-...... MIME::Types
-......  MIME::Lite::TT::HTML
-......  CGI::Session
-......  Lingua::EN::Inflect
-......  JSON
-......  JSON::Parse
-......  JSON::XS
-......  Net::Facebook::Oauth2
-......  XML::OPML
-......  REST::Client
-......  Net::Twitter::Lite::WithAPIv1_1
-......  Digest::SHA1
-......  Email::Stuffer
-......  vCard
-......  Net::OAuth
-......  Image::Resize
-......  DBD::mysql
-......  Mastodon::Client
+       MIME::Types
+       MIME::Lite::TT::HTML
+       CGI::Session
+       Lingua::EN::Inflect
+       JSON
+       JSON::Parse
+       JSON::XS
+       Net::Facebook::Oauth2
+       XML::OPML
+
+   REST::Client
+   Net::Twitter::Lite::WithAPIv1_1
+   Digest::SHA1
+   Email::Stuffer
+   vCard
+
+* Net::OAuth
+* Image::Resize
+* DBD::mysql
+* Mastodon::Client
 
 First install the modules available in repositories:
 
