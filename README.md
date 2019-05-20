@@ -18,24 +18,24 @@ Optional: Install Git to get/manage gRSShopper files. You can do the same by dow
 
 Additionaly you need to install following Perl modules:
 
-  MIME::Types
-  MIME::Lite::TT::HTML
-  CGI::Session
-  Lingua::EN::Inflect
-  JSON
-  JSON::Parse
-  JSON::XS
-  Net::Facebook::Oauth2
-  XML::OPML
-  REST::Client
-  Net::Twitter::Lite::WithAPIv1_1
-  Digest::SHA1
-  Email::Stuffer
-  vCard
-  Net::OAuth
-  Image::Resize
-  DBD::mysql
-  Mastodon::Client
+...... MIME::Types
+......  MIME::Lite::TT::HTML
+......  CGI::Session
+......  Lingua::EN::Inflect
+......  JSON
+......  JSON::Parse
+......  JSON::XS
+......  Net::Facebook::Oauth2
+......  XML::OPML
+......  REST::Client
+......  Net::Twitter::Lite::WithAPIv1_1
+......  Digest::SHA1
+......  Email::Stuffer
+......  vCard
+......  Net::OAuth
+......  Image::Resize
+......  DBD::mysql
+......  Mastodon::Client
 
 First install the modules available in repositories:
 
@@ -43,15 +43,17 @@ First install the modules available in repositories:
 
 Next build the remaining modules with `cpanm`:
 
-`cpan Image::Resize`
+`cpanm Image::Resize`
 
-`cpan Digest::SHA1`
+`cpanm Digest::SHA1`
 
-`cpan JSON::Parse`
+`cpanm JSON::Parse`
 
-`cpan Mastodon::Client`
+`cpanm Mastodon::Client`
 
-In case of failure during *Mastodon::Client* build use/download the *no_mstodon* branch in Git repository.
+NOTE: I was unable to build *Mastodon::Client* 've often encountered failures 
+
+In case of failure during *Mastodon::Client* build use/download the *no_mastodon* branch in Git repository.
 
 
 
