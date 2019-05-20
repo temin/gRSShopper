@@ -8,6 +8,8 @@ This clone contains few fixes and improvements that enabled me to install gRSSho
 Installation - on Debian/Ubuntu
 -------------------------------
 
+### Installing software
+
 gRSShopper is a LAMP (P as Perl) application and the base packages to install are:
 
   ```
@@ -58,12 +60,102 @@ Next build the remaining modules with `cpanm`:
 
 NOTE: I was unable to build *Mastodon::Client* on Debian (8 & 9) and Ubuntu (16 & 18). As I will not be using Mastodon, I've created the **no_mastodon** branch with Mastodon code removed from the gRSShopper code.
 
-NOTE: Different Debian/Ubuntu versions have different Perl modules available in the repositories. The code above is valid for Debian 9. For other versions check [INSTALL_versions](./INSTALL_versions.md).
+NOTE: Different Debian/Ubuntu versions have different Perl modules available in the repositories. The above lists of Perl module packages to install and build are valid for Debian 9. For other versions check [INSTALL_versions](./INSTALL_versions.md).
 
 
+### Apache config
 
+Add or change Apache virtual host configuration file:
 
+```apache
+  <VirtualHost *:80>
 
+    ServerName example.org
+
+    DocumentRoot /var/www/grsshopper
+
+    ScriptAlias /cgi-bin/ /var/www/grsshopper/cgi-bin/
+    <Directory "/var/www/grsshopper/cgi-bin">
+            AllowOverride None
+            Options +ExecCGI -MultiViews +SymLinksIfOwnerMatch
+            Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/grsshopper-error.log
+    CustomLog ${APACHE_LOG_DIR}/grsshopper-access.log combined
+
+  </VirtualHost>
+```
+
+Don't forget to enable the new site:
+
+  ```
+  a2ensite grsshopper.conf
+  ```
+
+Enable Apache modules:
+
+  ```
+  a2enmod cgid rewrite
+  ```
+
+### gRSShopper code
+
+Get gRSShopper code from GitHub:
+
+  ```
+  $ git clone https://github.com/temin/gRSShopper.git
+  ```
+
+Create website root folder:
+
+  ```
+  # mkdir /var/www/grsshopper
+  ```
+
+Synchronize the *cgi-bin* folder to the appropriate locations:
+
+  ```
+  rsync -av /path/to/git_repo_clone/grsshopper/cgi-bin /var/www/grsshopper
+  ```
+
+Synchronize the *html* folder to the appropriate locations:
+
+  ```
+  rsync -av /path/to/git_repo_clone/grsshopper/html/ /var/www/grsshopper
+  ```
+
+Create *cgi-bin* data root folder:
+
+  ```
+  mkdir /var/www/grsshopper/cgi-bin/data
+  ```
+
+Change files permissions (might need a little bit of restricting):
+
+  ```
+  chown -R www-data:www-data /var/www/grsshopper
+  ```
+
+### Prepare MariaDB/MySQL database
+
+Create database
+
+  ```mysql
+  CREATE DATABASE grsshopper;
+  ```
+
+Create database user
+
+  ```mysql
+  GRANT ALL PRIVILEGES ON grsshopper.* TO grsshopper@localhost IDENTIFIED BY 'secret_password';
+  ```
+
+Import database
+
+  ```
+  $ mysql -u grsshopper -p grsshopper < /path/to/git_repo_clone/grsshopper/cgi-bin/sql/gRSShopper-ple.sql
+  ```
 
 Changed nameserver over to ns1.reclaimhosting.com   :)
 
