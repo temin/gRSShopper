@@ -1,16 +1,22 @@
 gRSShopper
+==========
 
-by Stephen Downes
+This is a clone of [Stephen Downes'](https://www.downes.ca/) Personal Learning Environments (PLE) [gRSShopper](https://github.com/Downes/gRSShopper).
 
-gRSShopper is a tool that aggregates, organizes and distributes resources to support online learning
+This clone contains few fixes and improvements that enabled me to install gRSShopper on [vanilla](https://en.wikipedia.org/wiki/Vanilla_software) Debian/Ubuntu server. Some fixes also originate from the comments Downes made in his [Installing gRSShopper on Reclaim](https://www.youtube.com/watch?v=T8PFEEQJ8kw) video.
 
+Installation - on Debian/Ubuntu
+-------------------------------
 
+gRSShopper is a LAMP (P as Perl) application and the base packages to install are:
 
---------------------------------------------------
-Installation - works for CPanel on Reclaim Hosting
---------------------------------------------------
+`apt install apache2 libapache2-mod-perl2 mariadb-server python-mysqldb rsync cpanminus dh-make-perl`
 
-In CPanel, Install Perl Modules:
+Optional: Install Git to get/manage gRSShopper files. You can do the same by downloading files fromGitHub.
+
+`apt install git`
+
+Additionaly you need to install following Perl modules:
 
   MIME::Types
   MIME::Lite::TT::HTML
@@ -30,6 +36,20 @@ In CPanel, Install Perl Modules:
   Image::Resize
   DBD::mysql
   Mastodon::Client
+
+First install the modules available in repositories:
+
+`apt install libmime-types-perl libmime-lite-tt-html-perl libcgi-session-perl liblingua-en-inflect-perl libjson-perl libjson-xs-perl libnet-facebook-oauth2-perl libxml-opml-perl librest-client-perl libnet-twitter-lite-perl libdigest-sha-perl libemail-stuffer-perl libtext-vcard-perl libnet-oauth-perl libdbd-mysql-perl libgd-perl libapache2-mod-perl2 liblocal-lib-perl`
+
+Next build the remaining modules with `cpanm`:
+
+`cpan Image::Resize`
+`cpan Digest::SHA1`
+`cpan JSON::Parse`
+`cpan Mastodon::Client`
+
+In case of failure during *Mastodon::Client* build use/download the *no_mstodon* branch in Git repository.
+
 
 
 
