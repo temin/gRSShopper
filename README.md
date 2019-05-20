@@ -27,7 +27,7 @@ Optional: Install Git to get/manage gRSShopper files. You can do the same by dow
   # apt install git
   ```
 
-Additionaly you need to install following Perl modules:
+gRSShopper requires the following modules to be installed:
 
        MIME::Types
        MIME::Lite::TT::HTML
@@ -63,9 +63,9 @@ Next build the remaining modules with `cpanm`:
   # cpanm Mastodon::Client
   ```
 
-NOTE: I was unable to build *Mastodon::Client* on Debian (8 & 9) and Ubuntu (16 & 18). As I will not be using Mastodon, I've created the **no_mastodon** branch with Mastodon code removed from the gRSShopper code.
+NOTE: I was unable to build *Mastodon::Client* on Debian (8 & 9) and Ubuntu (16 & 18). As I will not be using Mastodon, I've created the [**no_mastodon**](https://github.com/temin/gRSShopper/tree/no_mastodon) branch with Mastodon code removed.
 
-NOTE: Different Debian/Ubuntu versions have different Perl modules available in the repositories. The above lists of Perl module packages to install and build are valid for Debian 9. For other versions check [INSTALL_versions](./INSTALL_versions.md).
+NOTE: Different Debian/Ubuntu versions have different Perl modules available in the repositories. The above lists of Perl module packages are valid for Debian 9. For other versions check [INSTALL_versions](./INSTALL_versions.md).
 
 
 ### Apache config
@@ -104,7 +104,7 @@ Enable Apache modules:
   a2enmod cgid rewrite
   ```
 
-In the end, don't forget to restart Apache service `systemctl restare apache2`.
+In the end, don't forget to restart Apache service `systemctl restart apache2`.
 
 ### gRSShopper code
 
@@ -120,13 +120,13 @@ Create website root folder:
   # mkdir /var/www/grsshopper
   ```
 
-Synchronize the *cgi-bin* folder to the appropriate locations:
+Synchronize the *cgi-bin* folder to the appropriate location:
 
   ```
   rsync -av /path/to/git_repo_clone/grsshopper/cgi-bin /var/www/grsshopper
   ```
 
-Synchronize the *html* folder to the appropriate locations:
+Synchronize the *html* folder to the appropriate location:
 
   ```
   rsync -av /path/to/git_repo_clone/grsshopper/html/ /var/www/grsshopper
@@ -144,7 +144,7 @@ Change files permissions (might need a little bit of restricting):
   chown -R www-data:www-data /var/www/grsshopper
   ```
 
-Create *perl5* folder and let user *www-data* to modify it:
+Create *perl5* folder and allow user *www-data* to modify it:
 
   ```
   mkdir /var/www/perl5
@@ -153,13 +153,13 @@ Create *perl5* folder and let user *www-data* to modify it:
 
 ### Prepare MariaDB/MySQL database
 
-Create database
+Create database:
 
   ```mysql
   CREATE DATABASE grsshopper;
   ```
 
-Create database user
+Create database user:
 
   ```mysql
   GRANT ALL PRIVILEGES ON grsshopper.* TO grsshopper@localhost IDENTIFIED BY 'secret_password';
@@ -177,7 +177,7 @@ Open `https://grsshopper.example.org/cgi-bin/server_test.cgi` URL in browser to 
 
 ### Initialize gRSShopper
 
-Open `https://grsshopper.kitaj.net/cgi-bin/initialize.cgi` URL in browser and fill in the form. For explanation check [Installing gRSShopper on Reclaim](https://www.youtube.com/watch?v=T8PFEEQJ8kw?t=2366) video.
+Open `https://grsshopper.example.org/cgi-bin/initialize.cgi` URL in browser and fill in the form. For explanation check [Installing gRSShopper on Reclaim](https://www.youtube.com/watch?v=T8PFEEQJ8kw?t=2366) video.
 
 
 Remove `initialize.cgi` file from web server.
