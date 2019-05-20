@@ -10,12 +10,14 @@ Installation - on Debian/Ubuntu
 
 gRSShopper is a LAMP (P as Perl) application and the base packages to install are:
 
-`apt install apache2 libapache2-mod-perl2 mariadb-server python-mysqldb rsync cpanminus dh-make-perl`
+  ```
+  # apt install apache2 libapache2-mod-perl2 mariadb-server python-mysqldb rsync cpanminus dh-make-perl
+  ```
 
 Optional: Install Git to get/manage gRSShopper files. You can do the same by downloading ZIP file from GitHub.
 
   ```bash
-  apt install git
+  # apt install git
   ```
 
 Additionaly you need to install following Perl modules:
@@ -41,17 +43,21 @@ Additionaly you need to install following Perl modules:
 
 First install the modules available in repositories:
 
-`apt install libmime-types-perl libmime-lite-tt-html-perl libcgi-session-perl liblingua-en-inflect-perl libjson-perl libjson-xs-perl libnet-facebook-oauth2-perl libxml-opml-perl librest-client-perl libnet-twitter-lite-perl libdigest-sha-perl libemail-stuffer-perl libtext-vcard-perl libnet-oauth-perl libdbd-mysql-perl libgd-perl libapache2-mod-perl2 liblocal-lib-perl`
+  ```bash
+  apt install libmime-types-perl libmime-lite-tt-html-perl libcgi-session-perl liblingua-en-inflect-perl libjson-perl libjson-xs-perl libnet-facebook-oauth2-perl libxml-opml-perl librest-client-perl libnet-twitter-lite-perl libdigest-sha-perl libemail-stuffer-perl libtext-vcard-perl libnet-oauth-perl libdbd-mysql-perl libgd-perl libapache2-mod-perl2 liblocal-lib-perl
+  ```
 
 Next build the remaining modules with `cpanm`:
 
-`cpanm Image::Resize`
+  ```bash
+  # cpanm Image::Resize
 
-`cpanm Digest::SHA1`
+  # cpanm Digest::SHA1
 
-`cpanm JSON::Parse`
+  # cpanm JSON::Parse
 
-`cpanm Mastodon::Client`
+  # cpanm Mastodon::Client
+  ```
 
 NOTE: I was unable to build *Mastodon::Client* 've often encountered failures 
 
