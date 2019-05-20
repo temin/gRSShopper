@@ -5,10 +5,15 @@ This is a clone of [Stephen Downes'](https://www.downes.ca/) Personal Learning E
 
 This clone contains few fixes and improvements that enabled me to install gRSShopper on [vanilla](https://en.wikipedia.org/wiki/Vanilla_software) Debian/Ubuntu server. Some fixes also originate from the comments Downes made in his [Installing gRSShopper on Reclaim](https://www.youtube.com/watch?v=T8PFEEQJ8kw) video.
 
-Installation - on Debian/Ubuntu
+Installation on Debian/Ubuntu
 -------------------------------
 
-### Installing software
+### Ansible playbook
+
+If you are familiar with Ansible you can use my [playbook](https://github.com/temin/ansible-grsshopper) to install gRSShoper.
+
+
+### Installing software manualy
 
 gRSShopper is a LAMP (P as Perl) application and the base packages to install are:
 
@@ -65,7 +70,7 @@ NOTE: Different Debian/Ubuntu versions have different Perl modules available in 
 
 ### Apache config
 
-Add or change Apache virtual host configuration file:
+Add or change Apache virtual host configuration file (e.g. `/etc/apache2/sites-available/grsshopper.conf`):
 
 ```apache
   <VirtualHost *:80>
@@ -87,7 +92,7 @@ Add or change Apache virtual host configuration file:
   </VirtualHost>
 ```
 
-Don't forget to enable the new site:
+Don't forget to enable the new site (if you created one):
 
   ```
   a2ensite grsshopper.conf
@@ -98,6 +103,8 @@ Enable Apache modules:
   ```
   a2enmod cgid rewrite
   ```
+
+In the end, don't forget to restart Apache service `systemctl restare apache2`.
 
 ### gRSShopper code
 
@@ -137,6 +144,13 @@ Change files permissions (might need a little bit of restricting):
   chown -R www-data:www-data /var/www/grsshopper
   ```
 
+Create *perl5* folder and let user *www-data* to modify it:
+
+  ```
+  mkdir /var/www/perl5
+  chown -R www-data:www-data /var/www/perl5
+  ```
+
 ### Prepare MariaDB/MySQL database
 
 Create database
@@ -163,17 +177,16 @@ Open `https://grsshopper.example.org/cgi-bin/server_test.cgi` URL in browser to 
 
 ### Initialize gRSShopper
 
-Open `http://www.downes.ca/cgi-bin/initialize.cgi` URL in browser and fill in the form. For explanation check [Installing gRSShopper on Reclaim](https://www.youtube.com/watch?v=T8PFEEQJ8kw?t=2366).
+Open `https://grsshopper.kitaj.net/cgi-bin/initialize.cgi` URL in browser and fill in the form. For explanation check [Installing gRSShopper on Reclaim](https://www.youtube.com/watch?v=T8PFEEQJ8kw?t=2366) video.
 
 
 Remove `initialize.cgi` file from web server.
 
-In `/var/www/grsshopper/assets/js/grsshopper_admin.js` enter the correct URL on the first line.
+Edit `/var/www/grsshopper/assets/js/grsshopper_admin.js` file. Enter the correct URL on the first line.
 
+### Set up Cron (once a minute):
 
-Set up Cron (once a minute):
-
-  ```
+  ```cron
   * * * * www-data /usr/bin/perl "/var/www/grsshopper/cgi-bin/admin.cgi grsshopper.example.org site_key /var/www/grsshopper/cgi-bin/data/multisite.txt" > /dev/null 2>&1
   ```
 
