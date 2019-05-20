@@ -16,7 +16,7 @@ gRSShopper is a LAMP (P as Perl) application and the base packages to install ar
 
 Optional: Install Git to get/manage gRSShopper files. You can do the same by downloading ZIP file from GitHub.
 
-  ```bash
+  ```
   # apt install git
   ```
 
@@ -43,25 +43,22 @@ Additionaly you need to install following Perl modules:
 
 First install the modules available in repositories:
 
-  ```bash
+  ```
   apt install libmime-types-perl libmime-lite-tt-html-perl libcgi-session-perl liblingua-en-inflect-perl libjson-perl libjson-xs-perl libnet-facebook-oauth2-perl libxml-opml-perl librest-client-perl libnet-twitter-lite-perl libdigest-sha-perl libemail-stuffer-perl libtext-vcard-perl libnet-oauth-perl libdbd-mysql-perl libgd-perl libapache2-mod-perl2 liblocal-lib-perl
   ```
 
 Next build the remaining modules with `cpanm`:
 
-  ```bash
+  ```
   # cpanm Image::Resize
-
   # cpanm Digest::SHA1
-
   # cpanm JSON::Parse
-
   # cpanm Mastodon::Client
   ```
 
-NOTE: I was unable to build *Mastodon::Client* 've often encountered failures 
+NOTE: I was unable to build *Mastodon::Client* on Debian (8 & 9) and Ubuntu (16 & 18). As I will not be using Mastodon, I've created the **no_mastodon** branch with Mastodon code removed from the gRSShopper code.
 
-In case of failure during *Mastodon::Client* build use/download the *no_mastodon* branch in Git repository.
+NOTE: Different Debian/Ubuntu versions have different Perl modules available in the repositories. The code above is valid for Debian 9. For other versions check [INSTALL_versions](./INSTALL_versions.md).
 
 
 
