@@ -70,7 +70,7 @@ Add or change Apache virtual host configuration file:
 ```apache
   <VirtualHost *:80>
 
-    ServerName example.org
+    ServerName grsshopper.example.org
 
     DocumentRoot /var/www/grsshopper
 
@@ -157,88 +157,26 @@ Import database
   $ mysql -u grsshopper -p grsshopper < /path/to/git_repo_clone/grsshopper/cgi-bin/sql/gRSShopper-ple.sql
   ```
 
-Changed nameserver over to ns1.reclaimhosting.com   :)
+### Test installation
 
-In FTP Client or File Manager
-- load cgi-bin files into ../public_html/cgi-bin
-- load html files into ../public_html    
-- make cgi-bin/data folder
+Open `https://grsshopper.example.org/cgi-bin/server_test.cgi` URL in browser to check if all the required modules are properly installed.
 
-In CPanel
-- changed permissions of scripts to 0755
-- run https://www.downes.ca/cgi-bin/server_test.cgi
-    This tests the cgi installation. On different hosts you may need to install additional Perl modules
+### Initialize gRSShopper
 
-In CPanel/MySQL Databases:
-- Create database
-- Create database user   
-- Add user to database with all privileges  (keep this information, you will need it to fill in the form below)
-
-In PHPMyAdmin
-- import grsshopper-ple.sql into database
-
-Run http://www.downes.ca/cgi-bin/initialize.cgi
-   and fill in the form
-
---------------------------------------------------------------------   
-
-Some help with the form (*** means 'pick whatever you want'):
-
-   Site document directory:    ../     
-
-   Site cgi directory is:      ./
+Open `http://www.downes.ca/cgi-bin/initialize.cgi` URL in browser and fill in the form. For explanation check [Installing gRSShopper on Reclaim](https://www.youtube.com/watch?v=T8PFEEQJ8kw?t=2366).
 
 
+Remove `initialize.cgi` file from web server.
 
-   Database Name			database name, from above
-
-   Database Location			localhost
-
-   Database Username	database user name, from above
-
-   Database Password	database user password, from above
-
-   Language				en
-
-   Site Document Directory		/home/*******/public_html                 (needs to be full filename and directory)
-
-   Site CGI Directory		/home/*******/public_html/cgi-bin
+In `/var/www/grsshopper/assets/js/grsshopper_admin.js` enter the correct URL on the first line.
 
 
-   Site Name				********
+Set up Cron (once a minute):
 
-   Site Tag				  **********
+  ```
+  * * * * www-data /usr/bin/perl "/var/www/grsshopper/cgi-bin/admin.cgi grsshopper.example.org site_key /var/www/grsshopper/cgi-bin/data/multisite.txt" > /dev/null 2>&1
+  ```
 
-  Site Email Address		*********
+To open the PLE, navigate to https://grsshopper.example.org/cgi-bin/page.cgi?page=PLE&force=yes
 
-  Site Time Zone			America/Toronto
-
-   License				CC-by-NC
-
-   Site Key				**********                                             (take note of this, you need it to run cron)
-
-
-   Administrator Username		**********                                   (You will use these to log into your gRSShopper PLE)
-
-   Administrator Password		***********
-
-- Click 'Multisite'
-
-------------------------------------------------------------
-
-- Remove initialize.cgi
-
-- In ../public_html/assets/js/grsshopper_admin.js
-   -- change www.downes.ca  to your new site URL (bit of a kludge here)
-
------------
-
-- Set up Cron (once a minute)
-/home/********/public_html/cgi-bin/admin.cgi www.downes.ca ^^^^^^^^ /home/******/public_html/cgi-bin/data/multisite.txt >/dev/null 2>&1
-
--- where *********** is your directory
-and ^^^^^^^^^^ is the site key entered in the form above
-
-- To open the PLE, navigate to https://yourservername/cgi-bin/page.cgi?page=PLE&force=yes
-
-(once you publish this page you can just go to https://yourservername/ple.htm  )
+(once you publish this page you can just go to https://grsshopper.example.org/ple.htm  )
