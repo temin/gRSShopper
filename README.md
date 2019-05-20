@@ -14,7 +14,7 @@ gRSShopper is a LAMP (P as Perl) application and the base packages to install ar
 
 Optional: Install Git to get/manage gRSShopper files. You can do the same by downloading ZIP file from GitHub.
 
-`apt install git`
+``` apt install git ```
 
 Additionaly you need to install following Perl modules:
 
@@ -27,17 +27,15 @@ Additionaly you need to install following Perl modules:
        JSON::XS
        Net::Facebook::Oauth2
        XML::OPML
-
-   REST::Client
-   Net::Twitter::Lite::WithAPIv1_1
-   Digest::SHA1
-   Email::Stuffer
-   vCard
-
-* Net::OAuth
-* Image::Resize
-* DBD::mysql
-* Mastodon::Client
+       REST::Client
+       Net::Twitter::Lite::WithAPIv1_1
+       Digest::SHA1
+       Email::Stuffer
+       vCard
+       Net::OAuth
+       Image::Resize
+       DBD::mysql
+       Mastodon::Client
 
 First install the modules available in repositories:
 
