@@ -12,7 +12,7 @@ gRSShopper is a LAMP (P as Perl) application and the base packages to install ar
 
 `apt install apache2 libapache2-mod-perl2 mariadb-server python-mysqldb rsync cpanminus dh-make-perl`
 
-Optional: Install Git to get/manage gRSShopper files. You can do the same by downloading files fromGitHub.
+Optional: Install Git to get/manage gRSShopper files. You can do the same by downloading ZIP file from GitHub.
 
 `apt install git`
 
@@ -44,8 +44,11 @@ First install the modules available in repositories:
 Next build the remaining modules with `cpanm`:
 
 `cpan Image::Resize`
+
 `cpan Digest::SHA1`
+
 `cpan JSON::Parse`
+
 `cpan Mastodon::Client`
 
 In case of failure during *Mastodon::Client* build use/download the *no_mstodon* branch in Git repository.
