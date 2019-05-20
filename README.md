@@ -10,7 +10,7 @@ Installation on Debian/Ubuntu
 
 ### Ansible playbook
 
-If you are familiar with Ansible you can use my [playbook](https://github.com/temin/ansible-grsshopper) to install gRSShoper.
+If you are familiar with Ansible you can use my [playbook](https://github.com/temin/ansible-grsshopper) to install gRSShopper.
 
 
 ### Installing software manualy
